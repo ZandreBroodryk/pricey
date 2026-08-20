@@ -123,10 +123,19 @@ defaulting to open.
 
 Targets Vercel's Docker deployments with a [Neon](https://neon.tech) database.
 
-Rehearse the container locally before deploying — this is the same image Vercel builds:
+The image is defined in **`Dockerfile.vercel`** — Vercel looks for that name, and it is the
+only Dockerfile in the repo so the deployed image and the local one cannot drift apart.
+
+Rehearse the container locally before deploying — this builds that same file:
 
 ```sh
 docker compose --profile full up --build   # http://localhost:8080
+```
+
+To build it directly, point at it explicitly, since it is not named `Dockerfile`:
+
+```sh
+docker build -f Dockerfile.vercel -t pricey .
 ```
 
 Environment variables to set on the Vercel project:

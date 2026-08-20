@@ -23,7 +23,11 @@ services:
       retries: 10
 
   app:
-    build: .
+    # Same Dockerfile Vercel deploys from, so `--profile full` is a true rehearsal
+    # of the deployed image rather than a lookalike that can drift from it.
+    build:
+      context: .
+      dockerfile: Dockerfile.vercel
     profiles: ["full"]
     depends_on:
       db:

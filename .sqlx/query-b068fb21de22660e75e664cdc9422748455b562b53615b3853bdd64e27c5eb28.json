@@ -1,0 +1,62 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select s.id, s.url, s.css_selector, s.price_regex\n        from item_sources s\n        join wishlist_items i on i.id = s.item_id\n        where s.active and i.active\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "item_sources",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "url",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "item_sources",
+            "name": "url"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "css_selector",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "item_sources",
+            "name": "css_selector"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "price_regex",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "item_sources",
+            "name": "price_regex"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "b068fb21de22660e75e664cdc9422748455b562b53615b3853bdd64e27c5eb28"
+}

@@ -1,0 +1,136 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select s.id, s.label, s.url, s.css_selector, s.price_regex, s.active,\n               p.ok as \"latest_ok?\", p.price_cents as \"latest_price_cents?\",\n               p.error as \"latest_error?\", p.fetched_at as \"latest_fetched_at?\"\n        from item_sources s\n        left join lateral (\n            select ok, price_cents, error, fetched_at\n            from price_snapshots\n            where source_id = s.id\n            order by fetched_at desc\n            limit 1\n        ) p on true\n        where s.item_id = $1\n        order by lower(s.label)\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "item_sources",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "label",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "item_sources",
+            "name": "label"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "url",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "item_sources",
+            "name": "url"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "css_selector",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "item_sources",
+            "name": "css_selector"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "price_regex",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "item_sources",
+            "name": "price_regex"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "active",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "item_sources",
+            "name": "active"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "latest_ok?",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "price_snapshots",
+            "name": "ok"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "latest_price_cents?",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "price_snapshots",
+            "name": "price_cents"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "latest_error?",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "price_snapshots",
+            "name": "error"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "latest_fetched_at?",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "price_snapshots",
+            "name": "fetched_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "209caf96d9e9375d11d96496a879995fecb621e472ee778bb1966bd98456a991"
+}

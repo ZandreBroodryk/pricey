@@ -1,91 +1,192 @@
-<picture>
-    <source srcset="https://raw.githubusercontent.com/leptos-rs/leptos/main/docs/logos/Leptos_logo_Solid_White.svg" media="(prefers-color-scheme: dark)">
-    <img src="https://raw.githubusercontent.com/leptos-rs/leptos/main/docs/logos/Leptos_logo_RGB.svg" alt="Leptos Logo">
-</picture>
+# pricey
 
-# Leptos Axum Starter Template
+A personal price tracker. Add things you want, point the tracker at one or more retailer
+pages for each, and it records what they cost over time — viewable as a table and a graph.
 
-This is a template for use with the [Leptos](https://github.com/leptos-rs/leptos) web framework and the [cargo-leptos](https://github.com/akesson/cargo-leptos) tool using [Axum](https://github.com/tokio-rs/axum).
+Built with [Leptos](https://leptos.dev) 0.8 (SSR + hydration) on Axum, backed by Postgres.
 
-## Creating your template repo
+## What it does
 
-If you don't have `cargo-leptos` installed you can install it with
+- **Wishlist CRUD** — items you're tracking, each with an optional target price.
+- **Multiple retailers per item** — one product can be watched at several shops, each with
+  its own URL and CSS selector. Prices are compared on shared axes.
+- **Scheduled price checks** — `GET|POST /api/fetch-prices` refreshes every tracked source
+  and records a timestamped snapshot. Vercel Cron calls it daily; the UI can trigger the
+  same run on demand.
+- **Price history** — a multi-series SVG chart and a filterable table, including failed
+  fetches so a broken selector is visible rather than silently absent.
+- **Email + password auth** — server-side sessions, argon2 hashes, per-user data, with
+  address verification by email before an account can be used.
 
-```bash
-cargo install cargo-leptos --locked
-```
+## Requirements
 
-Then run
-```bash
-cargo leptos new --git https://github.com/leptos-rs/start-axum
-```
+- Rust (stable; `rust-toolchain.toml` pins it and adds the `wasm32-unknown-unknown` target)
+- [`cargo-leptos`](https://github.com/leptos-rs/cargo-leptos) — `cargo install cargo-leptos --locked`
+- [`sqlx-cli`](https://github.com/launchbadge/sqlx) — `cargo install sqlx-cli --no-default-features --features rustls,postgres`
+- Docker, for the local Postgres
 
-to generate a new project template.
+## Getting started
 
-```bash
-cd pricey
-```
-
-to go to your newly created project.
-Feel free to explore the project structure, but the best place to start with your application code is in `src/app.rs`.
-Additionally, Cargo.toml may need updating as new versions of the dependencies are released, especially if things are not working after a `cargo update`.
-
-## Running your project
-
-```bash
-cargo leptos watch
-```
-
-## Installing Additional Tools
-
-By default, `cargo-leptos` uses `nightly` Rust, `cargo-generate`, and `sass`. If you run into any trouble, you may need to install one or more of these tools.
-
-1. `rustup toolchain install nightly --allow-downgrade` - make sure you have Rust nightly
-2. `rustup target add wasm32-unknown-unknown` - add the ability to compile Rust to WebAssembly
-3. `cargo install cargo-generate` - install `cargo-generate` binary (should be installed automatically in future)
-4. `npm install -g sass` - install `dart-sass` (should be optional in future
-5. Run `npm install` in end2end subdirectory before test
-
-## Compiling for Release
-```bash
-cargo leptos build --release
-```
-
-Will generate your server binary in target/release and your site package in target/site
-
-## Testing Your Project
-```bash
-cargo leptos end-to-end
-```
-
-```bash
-cargo leptos end-to-end --release
-```
-
-Cargo-leptos uses Playwright as the end-to-end test tool.
-Tests are located in end2end/tests directory.
-
-## Executing a Server on a Remote Machine Without the Toolchain
-After running a `cargo leptos build --release` the minimum files needed are:
-
-1. The server binary located in `target/server/release`
-2. The `site` directory and all files within located in `target/site`
-
-Copy these files to your remote server. The directory structure should be:
-```text
-pricey
-site/
-```
-Set the following environment variables (updating for your project as needed):
 ```sh
-export LEPTOS_OUTPUT_NAME="pricey"
-export LEPTOS_SITE_ROOT="site"
-export LEPTOS_SITE_PKG_DIR="pkg"
-export LEPTOS_SITE_ADDR="127.0.0.1:3000"
-export LEPTOS_RELOAD_PORT="3001"
+cp .env.example .env
+docker compose up -d db          # Postgres on localhost:5432
+cargo sqlx migrate run           # apply migrations/
+cargo leptos watch               # http://127.0.0.1:3000
 ```
-Finally, run the server binary.
 
-## Licensing
+Then create an account at `/signup`. Signing up sends a confirmation link; **with no
+`RESEND_API_KEY` set the link is written to the log instead of emailed**, so local
+development needs no Resend account:
 
-This template itself is released under the Unlicense. You should replace the LICENSE for your own application with an appropriate license if you plan to release it publicly.
+```
+WARN pricey::server::email: RESEND_API_KEY is not set; logging the verification link
+     instead of sending it recipient=you@example.com link=http://127.0.0.1:3000/verify?token=...
+```
+
+Open that link, sign in, then add an item and give it a retailer.
+
+### Email verification
+
+An account cannot sign in until its address is confirmed — that is what stops a stranger
+registering with a throwaway or someone else's address.
+
+- Signup creates the account but **no session**, and emails a link valid for 24 hours
+- `GET /verify?token=…` consumes the token and redirects to `/login?verify=…`; it is a
+  plain route, not a Leptos page, so it works in any client that opens the link
+- Tokens are single-use, and only their **SHA-256 is stored** — the token itself exists
+  only in the email, so a leaked database backup cannot be used to verify accounts
+- `/login` offers a "send a new link" form when that is actually the problem. It reports
+  the same result for every address and is rate limited, so it is neither an
+  account-existence oracle nor a way to have this service repeatedly mail a third party
+
+To send real mail, set `RESEND_API_KEY` and `EMAIL_FROM` (the from-address must be on a
+domain verified in Resend), and `APP_BASE_URL` so links point at the right host.
+
+### Adding a retailer
+
+Each source needs a **URL** and a **CSS selector** that points at the price on that page.
+Find one with your browser's inspector — `span.price-now`, or `meta[itemprop="price"]`
+(the `content` attribute is read automatically, and is usually the most stable choice).
+
+If the selector matches a larger blob of text, add an optional **regex**; capture group 1
+is used when present. The **Test** button runs a real fetch and shows what would be
+extracted *without* recording it, which is the fast way to get a selector right.
+
+**Prefer a selector anchored to the product block over a positional one.** Product pages
+usually repeat the same price class in "related products" carousels, so `span.price` or
+`span.price:nth-child(1)` may quietly latch onto a different product if the page layout
+shifts — recording a wrong price rather than an error. Anchor to the container instead:
+
+```
+.add-to-cart-wrapper .price-box .price     good - tied to the buy box
+span.price:nth-child(1)                    fragile - position-dependent
+meta[itemprop="price"]                     best, when the page provides it
+```
+
+### If a retailer returns HTTP 403
+
+Sites behind Cloudflare reject requests that carry a browser `User-Agent` but omit the
+headers a browser sends with it — the *mismatch* is what looks automated. The client in
+`src/server/price.rs` therefore sends a full navigation header set (`Sec-Fetch-Dest` is the
+one that matters in practice).
+
+A 403 that appears only under load is a different problem: rate limiting. Sources are
+grouped by host and each host is fetched serially with a short gap
+(`SAME_HOST_DELAY` in `src/server/runner.rs`) so tracking several products at one shop does
+not trip it. If a retailer is stricter, raise that value.
+
+Some sites render prices with JavaScript. Those cannot be scraped this way at all, since
+only the served HTML is parsed — look for a `<meta itemprop="price">` tag or a JSON-LD
+block in the page source instead.
+
+## Database
+
+SQL is checked at compile time by `sqlx`'s macros. To keep the Docker build hermetic, the
+query metadata is committed to `.sqlx/` and the build runs with `SQLX_OFFLINE=true`.
+
+**Re-generate the cache after changing any query or migration:**
+
+```sh
+cargo sqlx prepare -- --features ssr
+```
+
+and verify it is current with:
+
+```sh
+cargo sqlx prepare --check -- --features ssr
+```
+
+A stale `.sqlx/` breaks the container build with no local signal, so treat that check as
+part of committing. Note that `.sqlx/` is deliberately excluded from both `.gitignore` and
+`.dockerignore`.
+
+## Tests
+
+```sh
+cargo test --features ssr        # price parsing, chart scales, formatting, auth hashing
+cargo leptos end-to-end          # Playwright (needs `npm install` in end2end/ first)
+```
+
+Checking both compilation targets is worthwhile, since the second catches a server-only
+dependency leaking into shared code:
+
+```sh
+cargo check --features ssr
+cargo check --lib --features hydrate --no-default-features --target wasm32-unknown-unknown
+```
+
+## The fetch endpoint
+
+```sh
+curl -i -X POST -H "Authorization: Bearer $CRON_SECRET" \
+  http://localhost:3000/api/fetch-prices
+```
+
+Returns a JSON report of attempted/succeeded/failed. Without a matching bearer token it
+returns 401; if `CRON_SECRET` is not configured at all it refuses to run rather than
+defaulting to open.
+
+## Deployment
+
+Targets Vercel's Docker deployments with a [Neon](https://neon.tech) database.
+
+The image is defined in **`Dockerfile.vercel`** — Vercel looks for that name, and it is the
+only Dockerfile in the repo so the deployed image and the local one cannot drift apart.
+
+Rehearse the container locally before deploying — this builds that same file:
+
+```sh
+docker compose --profile full up --build   # http://localhost:8080
+```
+
+To build it directly, point at it explicitly, since it is not named `Dockerfile`:
+
+```sh
+docker build -f Dockerfile.vercel -t pricey .
+```
+
+Environment variables to set on the Vercel project:
+
+| Variable | Notes |
+|---|---|
+| `DATABASE_URL` | Neon's **pooled** (`-pooler`) connection string, with `?sslmode=require` |
+| `CRON_SECRET` | Shared secret for `/api/fetch-prices`; Vercel Cron sends it automatically |
+| `APP_ENV` | Set to `production` so session cookies are marked `Secure` |
+| `APP_BASE_URL` | Public URL of the deployment; verification links are built from it |
+| `RESEND_API_KEY` | Resend API key. **Without it, links are logged rather than sent** |
+| `EMAIL_FROM` | Sender address, on a domain verified in Resend |
+
+Migrations run automatically at startup, so a fresh Neon branch provisions itself on the
+first boot. `vercel.json` schedules the daily price check (the free tier allows one cron
+invocation per day).
+
+## Notes and limitations
+
+- **Signup is open.** Anyone who reaches the deployment can create an account. Their data
+  is scoped to them, but they consume your database rows and outbound requests. To close
+  it, change `signup_allowed()` in `src/server/auth.rs`.
+- **One currency per item.** All of an item's sources are assumed to quote the same
+  currency; comparing across currencies would need exchange rates.
+- **Timestamps display in UTC.**
+- Scraping depends on retailers' markup, which changes. Failed fetches are recorded rather
+  than discarded so you can see when a selector has gone stale.

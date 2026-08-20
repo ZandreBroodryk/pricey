@@ -1,0 +1,8 @@
+target/
+end2end/node_modules/
+end2end/playwright-report/
+end2end/test-results/
+.git/
+.env
+
+# .sqlx/ must reach the builder: it is what makes SQLX_OFFLINE=true work.

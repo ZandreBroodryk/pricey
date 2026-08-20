@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update email_verifications set consumed_at = now() where id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ad3b6997337aacd88ee89c7828be71160d71a59ac01b86692f57c9abecd742d5"
+}

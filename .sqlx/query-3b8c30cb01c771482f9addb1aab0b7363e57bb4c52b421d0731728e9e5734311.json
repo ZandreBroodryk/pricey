@@ -1,0 +1,88 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select s.id as \"source_id!\", s.label as \"label!\",\n               p.price_cents, p.ok as \"ok!\", p.error, p.fetched_at as \"fetched_at!\"\n        from price_snapshots p\n        join item_sources s on s.id = p.source_id\n        where s.item_id = $1\n        order by p.fetched_at desc\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "source_id!",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "item_sources",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "label!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "item_sources",
+            "name": "label"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "price_cents",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "price_snapshots",
+            "name": "price_cents"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "ok!",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "price_snapshots",
+            "name": "ok"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "error",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "price_snapshots",
+            "name": "error"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "fetched_at!",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "price_snapshots",
+            "name": "fetched_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "3b8c30cb01c771482f9addb1aab0b7363e57bb4c52b421d0731728e9e5734311"
+}

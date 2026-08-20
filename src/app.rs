@@ -1,9 +1,15 @@
 use leptos::prelude::*;
 use leptos_meta::{provide_meta_context, MetaTags, Stylesheet, Title};
-use leptos_router::{
-    components::{Route, Router, Routes},
-    StaticSegment,
-};
+use leptos_router::components::{ParentRoute, Route, Router, Routes};
+use leptos_router::path;
+
+use crate::api::auth::{current_user, Login, Logout, Signup};
+use crate::components::nav::Nav;
+use crate::models::AuthUser;
+use crate::pages::item_detail::ItemDetailPage;
+use crate::pages::login::LoginPage;
+use crate::pages::signup::SignupPage;
+use crate::pages::wishlist::WishlistPage;
 
 pub fn shell(options: LeptosOptions) -> impl IntoView {
     view! {
@@ -12,6 +18,7 @@ pub fn shell(options: LeptosOptions) -> impl IntoView {
             <head>
                 <meta charset="utf-8"/>
                 <meta name="viewport" content="width=device-width, initial-scale=1"/>
+                <link rel="icon" href="/favicon.ico"/>
                 <AutoReload options=options.clone() />
                 <HydrationScripts options/>
                 <MetaTags/>
@@ -23,39 +30,85 @@ pub fn shell(options: LeptosOptions) -> impl IntoView {
     }
 }
 
+/// Who is signed in. Shared through context so the nav, the route guard and the pages all
+/// read one source of truth rather than each firing their own request.
+pub type UserResource = Resource<Result<Option<AuthUser>, ServerFnError>>;
+
+/// The auth actions live in `App` rather than in the pages that submit them, because the
+/// user resource has to refetch when any of them completes.
+#[derive(Clone, Copy)]
+pub struct AuthActions {
+    pub login: ServerAction<Login>,
+    pub signup: ServerAction<Signup>,
+    pub logout: ServerAction<Logout>,
+}
+
 #[component]
 pub fn App() -> impl IntoView {
-    // Provides context that manages stylesheets, titles, meta tags, etc.
     provide_meta_context();
 
+    let login = ServerAction::<Login>::new();
+    let signup = ServerAction::<Signup>::new();
+    let logout = ServerAction::<Logout>::new();
+    provide_context(AuthActions {
+        login,
+        signup,
+        logout,
+    });
+
+    // Re-resolving on every auth action is what makes the nav and the guard react to a
+    // sign-in or sign-out without a full page load.
+    let user: UserResource = Resource::new(
+        move || {
+            (
+                login.version().get(),
+                signup.version().get(),
+                logout.version().get(),
+            )
+        },
+        |_| async move { current_user().await },
+    );
+    provide_context(user);
+
     view! {
-        // injects a stylesheet into the document <head>
-        // id=leptos means cargo-leptos will hot-reload this stylesheet
         <Stylesheet id="leptos" href="/pkg/pricey.css"/>
+        <Title text="pricey"/>
 
-        // sets the document title
-        <Title text="Welcome to Leptos"/>
-
-        // content for this welcome page
         <Router>
+            <Nav/>
             <main>
-                <Routes fallback=|| "Page not found.".into_view()>
-                    <Route path=StaticSegment("") view=HomePage/>
+                <Routes fallback=|| view! { <p class="empty">"Page not found."</p> }>
+                    <Route path=path!("/login") view=LoginPage/>
+                    <Route path=path!("/signup") view=SignupPage/>
+                    <ParentRoute path=path!("") view=RequireAuth>
+                        <Route path=path!("") view=WishlistPage/>
+                        <Route path=path!("/items/:id") view=ItemDetailPage/>
+                    </ParentRoute>
                 </Routes>
             </main>
         </Router>
     }
 }
 
-/// Renders the home page of your application.
+/// Client-side gate for the signed-in pages.
+///
+/// This is convenience, not security: it stops a signed-out visitor seeing an empty shell
+/// and a burst of failing requests. Every server function enforces the same rule itself.
 #[component]
-fn HomePage() -> impl IntoView {
-    // Creates a reactive value to update the button
-    let count = RwSignal::new(0);
-    let on_click = move |_| *count.write() += 1;
+fn RequireAuth() -> impl IntoView {
+    use leptos_router::components::{Outlet, Redirect};
+
+    let user = expect_context::<UserResource>();
 
     view! {
-        <h1>"Welcome to Leptos!"</h1>
-        <button on:click=on_click>"Click Me: " {count}</button>
+        <Suspense fallback=|| view! { <p class="loading">"Loading..."</p> }>
+            {move || {
+                user.get().map(|result| match result {
+                    Ok(Some(_)) => view! { <Outlet/> }.into_any(),
+                    Ok(None) => view! { <Redirect path="/login"/> }.into_any(),
+                    Err(_) => view! { <Redirect path="/login"/> }.into_any(),
+                })
+            }}
+        </Suspense>
     }
 }

@@ -28,12 +28,49 @@ impl FetchOutcome {
 }
 
 /// Builds the shared HTTP client. One client per refresh run, so connections are reused.
+///
+/// The headers matter as much as the user agent. Retailers behind Cloudflare (Wootware,
+/// among others) return **403 with `cf-mitigated: challenge`** when a request carries a
+/// browser user agent but omits the headers a browser always sends alongside it -- the
+/// mismatch is what looks automated, not the user agent itself. `Sec-Fetch-Dest: document`
+/// is the one that clears it in practice; the rest are sent because a real navigation
+/// sends them together and a partial set is what got flagged in the first place.
+///
+/// `Accept-Encoding` is deliberately absent: reqwest sets and *decodes* it automatically
+/// from the `gzip`/`brotli` features, and declaring it by hand would mean receiving
+/// compressed bytes that never get decompressed.
 pub fn client() -> reqwest::Client {
+    use reqwest::header::{
+        HeaderMap, HeaderName, HeaderValue, ACCEPT, ACCEPT_LANGUAGE, UPGRADE_INSECURE_REQUESTS,
+    };
+
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        ACCEPT,
+        HeaderValue::from_static(
+            "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        ),
+    );
+    headers.insert(ACCEPT_LANGUAGE, HeaderValue::from_static("en-ZA,en;q=0.9"));
+    headers.insert(UPGRADE_INSECURE_REQUESTS, HeaderValue::from_static("1"));
+    for (name, value) in [
+        ("sec-fetch-dest", "document"),
+        ("sec-fetch-mode", "navigate"),
+        ("sec-fetch-site", "none"),
+        ("sec-fetch-user", "?1"),
+    ] {
+        headers.insert(
+            HeaderName::from_static(name),
+            HeaderValue::from_static(value),
+        );
+    }
+
     reqwest::Client::builder()
         .user_agent(
             "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) \
              Chrome/126.0.0.0 Safari/537.36",
         )
+        .default_headers(headers)
         .timeout(Duration::from_secs(15))
         .redirect(reqwest::redirect::Policy::limited(5))
         .build()

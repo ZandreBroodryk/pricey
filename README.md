@@ -45,6 +45,33 @@ If the selector matches a larger blob of text, add an optional **regex**; captur
 is used when present. The **Test** button runs a real fetch and shows what would be
 extracted *without* recording it, which is the fast way to get a selector right.
 
+**Prefer a selector anchored to the product block over a positional one.** Product pages
+usually repeat the same price class in "related products" carousels, so `span.price` or
+`span.price:nth-child(1)` may quietly latch onto a different product if the page layout
+shifts — recording a wrong price rather than an error. Anchor to the container instead:
+
+```
+.add-to-cart-wrapper .price-box .price     good - tied to the buy box
+span.price:nth-child(1)                    fragile - position-dependent
+meta[itemprop="price"]                     best, when the page provides it
+```
+
+### If a retailer returns HTTP 403
+
+Sites behind Cloudflare reject requests that carry a browser `User-Agent` but omit the
+headers a browser sends with it — the *mismatch* is what looks automated. The client in
+`src/server/price.rs` therefore sends a full navigation header set (`Sec-Fetch-Dest` is the
+one that matters in practice).
+
+A 403 that appears only under load is a different problem: rate limiting. Sources are
+grouped by host and each host is fetched serially with a short gap
+(`SAME_HOST_DELAY` in `src/server/runner.rs`) so tracking several products at one shop does
+not trip it. If a retailer is stricter, raise that value.
+
+Some sites render prices with JavaScript. Those cannot be scraped this way at all, since
+only the served HTML is parsed — look for a `<meta itemprop="price">` tag or a JSON-LD
+block in the page source instead.
+
 ## Database
 
 SQL is checked at compile time by `sqlx`'s macros. To keep the Docker build hermetic, the

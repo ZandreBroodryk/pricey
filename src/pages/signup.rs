@@ -7,10 +7,20 @@ use crate::components::action_error;
 #[component]
 pub fn SignupPage() -> impl IntoView {
     let action = expect_context::<AuthActions>().signup;
-    let error = move || action_error(action.value().get());
+    // The action is shared at the app level, so its value outlives this page: a result from
+    // an earlier visit is still sitting there when the router mounts us again. Anchor to the
+    // version at mount and only trust results newer than that, otherwise one signup would
+    // leave the form permanently replaced by the confirmation for the rest of the session.
+    let mounted_at = action.version().get_untracked();
+    let latest = move || {
+        (action.version().get() > mounted_at)
+            .then(|| action.value().get())
+            .flatten()
+    };
+    let error = move || action_error(latest());
     // Signup no longer signs you in -- it sends a link -- so success is a state this page
     // renders rather than a redirect.
-    let sent = move || matches!(action.value().get(), Some(Ok(())));
+    let sent = move || matches!(latest(), Some(Ok(())));
 
     view! {
         <section class="auth-page">

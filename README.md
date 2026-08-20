@@ -1,91 +1,126 @@
-<picture>
-    <source srcset="https://raw.githubusercontent.com/leptos-rs/leptos/main/docs/logos/Leptos_logo_Solid_White.svg" media="(prefers-color-scheme: dark)">
-    <img src="https://raw.githubusercontent.com/leptos-rs/leptos/main/docs/logos/Leptos_logo_RGB.svg" alt="Leptos Logo">
-</picture>
+# pricey
 
-# Leptos Axum Starter Template
+A personal price tracker. Add things you want, point the tracker at one or more retailer
+pages for each, and it records what they cost over time — viewable as a table and a graph.
 
-This is a template for use with the [Leptos](https://github.com/leptos-rs/leptos) web framework and the [cargo-leptos](https://github.com/akesson/cargo-leptos) tool using [Axum](https://github.com/tokio-rs/axum).
+Built with [Leptos](https://leptos.dev) 0.8 (SSR + hydration) on Axum, backed by Postgres.
 
-## Creating your template repo
+## What it does
 
-If you don't have `cargo-leptos` installed you can install it with
+- **Wishlist CRUD** — items you're tracking, each with an optional target price.
+- **Multiple retailers per item** — one product can be watched at several shops, each with
+  its own URL and CSS selector. Prices are compared on shared axes.
+- **Scheduled price checks** — `GET|POST /api/fetch-prices` refreshes every tracked source
+  and records a timestamped snapshot. Vercel Cron calls it daily; the UI can trigger the
+  same run on demand.
+- **Price history** — a multi-series SVG chart and a filterable table, including failed
+  fetches so a broken selector is visible rather than silently absent.
+- **Email + password auth** — server-side sessions, argon2 hashes, per-user data.
 
-```bash
-cargo install cargo-leptos --locked
-```
+## Requirements
 
-Then run
-```bash
-cargo leptos new --git https://github.com/leptos-rs/start-axum
-```
+- Rust (stable; `rust-toolchain.toml` pins it and adds the `wasm32-unknown-unknown` target)
+- [`cargo-leptos`](https://github.com/leptos-rs/cargo-leptos) — `cargo install cargo-leptos --locked`
+- [`sqlx-cli`](https://github.com/launchbadge/sqlx) — `cargo install sqlx-cli --no-default-features --features rustls,postgres`
+- Docker, for the local Postgres
 
-to generate a new project template.
+## Getting started
 
-```bash
-cd pricey
-```
-
-to go to your newly created project.
-Feel free to explore the project structure, but the best place to start with your application code is in `src/app.rs`.
-Additionally, Cargo.toml may need updating as new versions of the dependencies are released, especially if things are not working after a `cargo update`.
-
-## Running your project
-
-```bash
-cargo leptos watch
-```
-
-## Installing Additional Tools
-
-By default, `cargo-leptos` uses `nightly` Rust, `cargo-generate`, and `sass`. If you run into any trouble, you may need to install one or more of these tools.
-
-1. `rustup toolchain install nightly --allow-downgrade` - make sure you have Rust nightly
-2. `rustup target add wasm32-unknown-unknown` - add the ability to compile Rust to WebAssembly
-3. `cargo install cargo-generate` - install `cargo-generate` binary (should be installed automatically in future)
-4. `npm install -g sass` - install `dart-sass` (should be optional in future
-5. Run `npm install` in end2end subdirectory before test
-
-## Compiling for Release
-```bash
-cargo leptos build --release
-```
-
-Will generate your server binary in target/release and your site package in target/site
-
-## Testing Your Project
-```bash
-cargo leptos end-to-end
-```
-
-```bash
-cargo leptos end-to-end --release
-```
-
-Cargo-leptos uses Playwright as the end-to-end test tool.
-Tests are located in end2end/tests directory.
-
-## Executing a Server on a Remote Machine Without the Toolchain
-After running a `cargo leptos build --release` the minimum files needed are:
-
-1. The server binary located in `target/server/release`
-2. The `site` directory and all files within located in `target/site`
-
-Copy these files to your remote server. The directory structure should be:
-```text
-pricey
-site/
-```
-Set the following environment variables (updating for your project as needed):
 ```sh
-export LEPTOS_OUTPUT_NAME="pricey"
-export LEPTOS_SITE_ROOT="site"
-export LEPTOS_SITE_PKG_DIR="pkg"
-export LEPTOS_SITE_ADDR="127.0.0.1:3000"
-export LEPTOS_RELOAD_PORT="3001"
+cp .env.example .env
+docker compose up -d db          # Postgres on localhost:5432
+cargo sqlx migrate run           # apply migrations/
+cargo leptos watch               # http://127.0.0.1:3000
 ```
-Finally, run the server binary.
 
-## Licensing
+Then create an account at `/signup`, add an item, and give it a retailer.
 
-This template itself is released under the Unlicense. You should replace the LICENSE for your own application with an appropriate license if you plan to release it publicly.
+### Adding a retailer
+
+Each source needs a **URL** and a **CSS selector** that points at the price on that page.
+Find one with your browser's inspector — `span.price-now`, or `meta[itemprop="price"]`
+(the `content` attribute is read automatically, and is usually the most stable choice).
+
+If the selector matches a larger blob of text, add an optional **regex**; capture group 1
+is used when present. The **Test** button runs a real fetch and shows what would be
+extracted *without* recording it, which is the fast way to get a selector right.
+
+## Database
+
+SQL is checked at compile time by `sqlx`'s macros. To keep the Docker build hermetic, the
+query metadata is committed to `.sqlx/` and the build runs with `SQLX_OFFLINE=true`.
+
+**Re-generate the cache after changing any query or migration:**
+
+```sh
+cargo sqlx prepare -- --features ssr
+```
+
+and verify it is current with:
+
+```sh
+cargo sqlx prepare --check -- --features ssr
+```
+
+A stale `.sqlx/` breaks the container build with no local signal, so treat that check as
+part of committing. Note that `.sqlx/` is deliberately excluded from both `.gitignore` and
+`.dockerignore`.
+
+## Tests
+
+```sh
+cargo test --features ssr        # price parsing, chart scales, formatting, auth hashing
+cargo leptos end-to-end          # Playwright (needs `npm install` in end2end/ first)
+```
+
+Checking both compilation targets is worthwhile, since the second catches a server-only
+dependency leaking into shared code:
+
+```sh
+cargo check --features ssr
+cargo check --lib --features hydrate --no-default-features --target wasm32-unknown-unknown
+```
+
+## The fetch endpoint
+
+```sh
+curl -i -X POST -H "Authorization: Bearer $CRON_SECRET" \
+  http://localhost:3000/api/fetch-prices
+```
+
+Returns a JSON report of attempted/succeeded/failed. Without a matching bearer token it
+returns 401; if `CRON_SECRET` is not configured at all it refuses to run rather than
+defaulting to open.
+
+## Deployment
+
+Targets Vercel's Docker deployments with a [Neon](https://neon.tech) database.
+
+Rehearse the container locally before deploying — this is the same image Vercel builds:
+
+```sh
+docker compose --profile full up --build   # http://localhost:8080
+```
+
+Environment variables to set on the Vercel project:
+
+| Variable | Notes |
+|---|---|
+| `DATABASE_URL` | Neon's **pooled** (`-pooler`) connection string, with `?sslmode=require` |
+| `CRON_SECRET` | Shared secret for `/api/fetch-prices`; Vercel Cron sends it automatically |
+| `APP_ENV` | Set to `production` so session cookies are marked `Secure` |
+
+Migrations run automatically at startup, so a fresh Neon branch provisions itself on the
+first boot. `vercel.json` schedules the daily price check (the free tier allows one cron
+invocation per day).
+
+## Notes and limitations
+
+- **Signup is open.** Anyone who reaches the deployment can create an account. Their data
+  is scoped to them, but they consume your database rows and outbound requests. To close
+  it, change `signup_allowed()` in `src/server/auth.rs`.
+- **One currency per item.** All of an item's sources are assumed to quote the same
+  currency; comparing across currencies would need exchange rates.
+- **Timestamps display in UTC.**
+- Scraping depends on retailers' markup, which changes. Failed fetches are recorded rather
+  than discarded so you can see when a selector has gone stale.

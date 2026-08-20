@@ -13,8 +13,27 @@ axum = { version = "0.8.0", optional = true }
 console_error_panic_hook = { version = "0.1", optional = true }
 leptos_axum = { version = "0.8.0", optional = true }
 leptos_meta = { version = "0.8.0" }
-tokio = { version = "1", features = ["rt-multi-thread"], optional = true }
+tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "signal"], optional = true }
 wasm-bindgen = { version = "0.2.106", optional = true }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+sqlx = { version = "0.9.0", default-features = false, features = ["runtime-tokio", "tls-rustls-ring", "postgres", "uuid", "chrono", "macros", "migrate"], optional = true }
+uuid = { version = "1.24.1", features = ["v4", "serde"], optional = true }
+chrono = { version = "0.4.45", features = ["serde"], optional = true }
+reqwest = { version = "0.13.4", default-features = false, features = ["rustls", "gzip", "brotli", "charset", "http2", "system-proxy"], optional = true }
+scraper = { version = "0.27.0", optional = true }
+regex = { version = "1.13.1", optional = true }
+url = { version = "2.5.8", optional = true }
+argon2 = { version = "0.5.3", features = ["std"], optional = true }
+futures = { version = "0.3.34", optional = true }
+dotenvy = { version = "0.15.7", optional = true }
+tracing = { version = "0.1.44", optional = true }
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"], optional = true }
+http = { version = "1.5.0", optional = true }
+axum-extra = { version = "0.10", features = ["cookie"], optional = true }
+tower = { version = "0.5.3", optional = true }
+tower-http = { version = "0.6", features = ["compression-gzip", "trace"], optional = true }
+time = { version = "0.3", optional = true }
 
 [features]
 hydrate = [
@@ -29,7 +48,35 @@ ssr = [
     "leptos/ssr",
     "leptos_meta/ssr",
     "leptos_router/ssr",
+    # --- pricey server-only deps ---
+    "dep:sqlx",
+    "dep:uuid",
+    "dep:chrono",
+    "dep:reqwest",
+    "dep:scraper",
+    "dep:regex",
+    "dep:url",
+    "dep:argon2",
+    "dep:futures",
+    "dep:dotenvy",
+    "dep:tracing",
+    "dep:tracing-subscriber",
+    "dep:http",
+    "dep:axum-extra",
+    "dep:tower",
+    "dep:tower-http",
+    "dep:time",
 ]
+
+# Hashing and SQL machinery are unusably slow in an unoptimized debug build.
+[profile.dev.package.argon2]
+opt-level = 3
+
+[profile.dev.package.sqlx-macros]
+opt-level = 3
+
+[profile.dev.package.password-hash]
+opt-level = 3
 
 # Defines a size-optimized profile for the WASM bundle in release mode
 [profile.wasm-release]

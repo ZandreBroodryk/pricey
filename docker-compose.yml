@@ -1,0 +1,43 @@
+# Two jobs in one file:
+#
+#   docker compose up -d db              -> just Postgres, for `cargo leptos watch` and
+#                                           `cargo sqlx prepare` during normal development
+#   docker compose --profile full up --build
+#                                        -> Postgres *and* the app container, which is the
+#                                           rehearsal for the Vercel Docker deployment
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: pricey
+      POSTGRES_PASSWORD: pricey
+      POSTGRES_DB: pricey
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pricey -d pricey"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build: .
+    profiles: ["full"]
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # No sslmode here: local Postgres has no TLS, and sqlx defaults to `prefer`,
+      # so the same code path works against Neon (which requires it) unchanged.
+      DATABASE_URL: postgres://pricey:pricey@db:5432/pricey
+      PORT: "8080"
+      APP_ENV: production
+      CRON_SECRET: local-dev-secret
+      RUST_LOG: info,pricey=debug
+    ports:
+      - "8080:8080"
+
+volumes:
+  pgdata:

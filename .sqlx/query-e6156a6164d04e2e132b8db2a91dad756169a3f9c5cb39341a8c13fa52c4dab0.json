@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        delete from item_sources s\n        using wishlist_items i\n        where s.id = $1 and i.id = s.item_id and i.user_id = $2\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e6156a6164d04e2e132b8db2a91dad756169a3f9c5cb39341a8c13fa52c4dab0"
+}

@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        insert into price_snapshots (source_id, price_cents, ok, error)\n        select * from unnest($1::uuid[], $2::bigint[], $3::bool[], $4::text[])\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "UuidArray",
+        "Int8Array",
+        "BoolArray",
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "312d4280adb427219901facdb141bac0c075190866f8dd13f01ed31807514209"
+}

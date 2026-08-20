@@ -140,6 +140,114 @@ pub async fn current_session(pool: &PgPool) -> Option<Session> {
     })
 }
 
+/// How long a verification link stays usable.
+const VERIFICATION_HOURS: i64 = 24;
+
+/// Shortest gap between two verification emails to the same account.
+const RESEND_COOLDOWN_SECONDS: i64 = 60;
+
+/// Why a verification token was refused. Distinguished so the page can offer a fresh link
+/// for an expired one instead of a dead end.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VerifyFailure {
+    Unknown,
+    Expired,
+    AlreadyUsed,
+}
+
+/// Hashes a verification token for storage.
+///
+/// SHA-256 rather than argon2: the token is 122 bits of randomness we generated, not a
+/// user-chosen secret, so there is nothing for an attacker to guess and no need to make
+/// the comparison deliberately slow.
+pub fn hash_token(token: &str) -> String {
+    use sha2::{Digest, Sha256};
+
+    let digest = Sha256::digest(token.as_bytes());
+    digest.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// Issues a fresh verification token, returning the plaintext to put in the email.
+pub async fn create_verification(pool: &PgPool, user_id: Uuid) -> Result<String, sqlx::Error> {
+    let token = Uuid::new_v4().to_string();
+    let expires_at = Utc::now() + Duration::hours(VERIFICATION_HOURS);
+
+    sqlx::query!(
+        "insert into email_verifications (user_id, token_hash, expires_at) values ($1, $2, $3)",
+        user_id,
+        hash_token(&token),
+        expires_at
+    )
+    .execute(pool)
+    .await?;
+
+    Ok(token)
+}
+
+/// Marks an account verified if the token is good. Returns the address on success.
+pub async fn consume_verification(
+    pool: &PgPool,
+    token: &str,
+) -> Result<Result<String, VerifyFailure>, sqlx::Error> {
+    let Some(row) = sqlx::query!(
+        r#"
+        select v.id, v.user_id, v.consumed_at, v.expires_at, u.email
+        from email_verifications v
+        join users u on u.id = v.user_id
+        where v.token_hash = $1
+        "#,
+        hash_token(token)
+    )
+    .fetch_optional(pool)
+    .await?
+    else {
+        return Ok(Err(VerifyFailure::Unknown));
+    };
+
+    if row.consumed_at.is_some() {
+        return Ok(Err(VerifyFailure::AlreadyUsed));
+    }
+    if row.expires_at <= Utc::now() {
+        return Ok(Err(VerifyFailure::Expired));
+    }
+
+    // Mark the token spent and the account verified together, so a failure between the two
+    // cannot leave a consumed token on an unverified account.
+    let mut tx = pool.begin().await?;
+    sqlx::query!(
+        "update email_verifications set consumed_at = now() where id = $1",
+        row.id
+    )
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query!(
+        "update users set email_verified_at = now() where id = $1 and email_verified_at is null",
+        row.user_id
+    )
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+
+    Ok(Ok(row.email))
+}
+
+/// Whether a verification email was sent to this account very recently.
+///
+/// Stops the resend form being used to have this service mail a third party repeatedly.
+pub async fn resent_too_recently(pool: &PgPool, user_id: Uuid) -> Result<bool, sqlx::Error> {
+    let cutoff = Utc::now() - Duration::seconds(RESEND_COOLDOWN_SECONDS);
+    let recent = sqlx::query_scalar!(
+        r#"select exists(
+            select 1 from email_verifications where user_id = $1 and created_at > $2
+        ) as "recent!""#,
+        user_id,
+        cutoff
+    )
+    .fetch_one(pool)
+    .await?;
+    Ok(recent)
+}
+
 /// The guard every data-touching server function starts with.
 ///
 /// Client-side redirects are cosmetic; this is what actually protects the data.
@@ -171,6 +279,23 @@ mod tests {
         let a = hash_password("same").unwrap();
         let b = hash_password("same").unwrap();
         assert_ne!(a, b, "each hash must use a fresh salt");
+    }
+
+    #[test]
+    fn hashes_tokens_to_the_known_sha256_vector() {
+        // Guards against the hash silently changing, which would invalidate every
+        // outstanding verification link.
+        assert_eq!(
+            hash_token("abc"),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+    }
+
+    #[test]
+    fn token_hashing_is_deterministic_and_distinguishing() {
+        assert_eq!(hash_token("same-token"), hash_token("same-token"));
+        assert_ne!(hash_token("token-a"), hash_token("token-b"));
+        assert_eq!(hash_token("x").len(), 64, "hex-encoded SHA-256 is 64 chars");
     }
 
     #[test]

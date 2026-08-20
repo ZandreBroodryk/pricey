@@ -2,6 +2,7 @@
 
 pub mod auth;
 pub mod db;
+pub mod email;
 pub mod price;
 pub mod routes;
 pub mod runner;

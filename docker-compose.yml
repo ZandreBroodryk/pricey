@@ -39,6 +39,9 @@ services:
       PORT: "8080"
       APP_ENV: production
       CRON_SECRET: local-dev-secret
+      APP_BASE_URL: http://localhost:8080
+      # No RESEND_API_KEY here on purpose: the container logs verification links rather
+      # than sending real mail, so the rehearsal never emails anyone.
       RUST_LOG: info,pricey=debug
     ports:
       - "8080:8080"

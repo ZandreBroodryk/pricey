@@ -5,6 +5,11 @@ use crate::models::AuthUser;
 /// Minimum password length. Short enough not to be annoying, long enough to matter.
 pub const MIN_PASSWORD_LEN: usize = 10;
 
+/// Shown when a correct password belongs to an unconfirmed account. The login page matches
+/// on this to decide whether to offer the "send a new link" form.
+pub const UNVERIFIED_MESSAGE: &str =
+    "Confirm your email address before signing in. Check your inbox for the link.";
+
 /// Shallow email check: enough to catch typos, without pretending to validate deliverability.
 pub fn looks_like_email(email: &str) -> bool {
     let email = email.trim();
@@ -71,9 +76,35 @@ pub async fn signup(email: String, password: String, confirm: String) -> Result<
         _ => ServerFnError::new(format!("Could not create the account: {e}")),
     })?;
 
-    start_session(&pool, user_id).await?;
-    leptos_axum::redirect("/");
+    // Deliberately no session here. The account is unusable until the address is
+    // confirmed, so signing the browser in would only create a half-state to reason about.
+    send_verification_email(&pool, user_id, &email).await?;
     Ok(())
+}
+
+/// Sends a fresh verification link to an account.
+#[cfg(feature = "ssr")]
+async fn send_verification_email(
+    pool: &sqlx::PgPool,
+    user_id: uuid::Uuid,
+    email: &str,
+) -> Result<(), ServerFnError> {
+    use crate::server::{auth, email as mailer};
+
+    let token = auth::create_verification(pool, user_id)
+        .await
+        .map_err(|e| ServerFnError::new(format!("Could not create a verification link: {e}")))?;
+
+    mailer::send_verification(email, &mailer::verification_link(&token))
+        .await
+        .map_err(|e| {
+            // The account exists but is unreachable; say so rather than implying success.
+            tracing::error!(%e, "verification email failed to send");
+            ServerFnError::new(
+                "Your account was created, but the verification email could not be sent. \
+                 Try requesting a new link in a moment.",
+            )
+        })
 }
 
 #[server(name = Login, prefix = "/api", endpoint = "auth/login")]
@@ -84,7 +115,10 @@ pub async fn login(email: String, password: String) -> Result<(), ServerFnError>
     let email = email.trim().to_string();
 
     let found = sqlx::query!(
-        r#"select id, password_hash from users where lower(email) = lower($1)"#,
+        r#"
+        select id, password_hash, email_verified_at
+        from users where lower(email) = lower($1)
+        "#,
         email
     )
     .fetch_optional(&pool)
@@ -102,8 +136,53 @@ pub async fn login(email: String, password: String) -> Result<(), ServerFnError>
         return Err(ServerFnError::new("Invalid email or password."));
     }
 
+    // Checked only after the password matches, so this never reveals whether an address is
+    // registered to someone who does not already know the password.
+    if record.email_verified_at.is_none() {
+        return Err(ServerFnError::new(UNVERIFIED_MESSAGE));
+    }
+
     start_session(&pool, record.id).await?;
     leptos_axum::redirect("/");
+    Ok(())
+}
+
+/// Sends a new verification link.
+///
+/// Always reports success, whatever the address turns out to be: this form is reachable
+/// without signing in, so a truthful answer would turn it into an account-existence oracle.
+#[server(name = ResendVerification, prefix = "/api", endpoint = "auth/resend")]
+pub async fn resend_verification(email: String) -> Result<(), ServerFnError> {
+    use crate::server::auth;
+
+    let pool = crate::server::pool()?;
+    let email = email.trim().to_string();
+
+    let found = sqlx::query!(
+        r#"select id, email, email_verified_at from users where lower(email) = lower($1)"#,
+        email
+    )
+    .fetch_optional(&pool)
+    .await
+    .map_err(|e| ServerFnError::new(format!("Could not send the link: {e}")))?;
+
+    // Nothing to do for an unknown address, or one that is already confirmed.
+    let Some(user) = found.filter(|u| u.email_verified_at.is_none()) else {
+        return Ok(());
+    };
+
+    // Rate limited so this cannot be used to repeatedly mail somebody else's address.
+    let too_soon = auth::resent_too_recently(&pool, user.id)
+        .await
+        .map_err(|e| ServerFnError::new(format!("Could not send the link: {e}")))?;
+    if too_soon {
+        return Ok(());
+    }
+
+    // A send failure is logged but not surfaced, for the same reason as above.
+    if let Err(e) = send_verification_email(&pool, user.id, &user.email).await {
+        tracing::error!(error = %e.to_string(), "resend of verification email failed");
+    }
     Ok(())
 }
 

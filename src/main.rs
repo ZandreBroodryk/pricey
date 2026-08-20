@@ -49,6 +49,8 @@ async fn main() {
             "/api/fetch-prices",
             get(routes::fetch_prices).post(routes::fetch_prices),
         )
+        // The link people click in their verification email.
+        .route("/verify", get(routes::verify_email))
         // Server functions are registered explicitly so they receive the database pool.
         .route(
             "/api/{*fn_name}",

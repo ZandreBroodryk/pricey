@@ -1,7 +1,7 @@
 //! Axum wiring: server-function handling with context, and the cron endpoint.
 
 use axum::body::Body;
-use axum::extract::State;
+use axum::extract::{Query, State};
 use axum::http::header::AUTHORIZATION;
 use axum::http::{HeaderMap, Request, StatusCode};
 use axum::response::{IntoResponse, Response};
@@ -10,7 +10,7 @@ use leptos::prelude::*;
 use leptos_axum::{handle_server_fns_with_context, render_app_to_stream_with_context};
 use serde_json::json;
 
-use super::{runner, state::AppState};
+use super::{auth, runner, state::AppState};
 use crate::app::shell;
 
 /// Server functions need the pool; `provide_context` is how it reaches them.
@@ -83,6 +83,51 @@ pub async fn fetch_prices(State(state): State<AppState>, headers: HeaderMap) -> 
                 .into_response()
         }
     }
+}
+
+/// Query string of the link sent in the verification email.
+#[derive(serde::Deserialize)]
+pub struct VerifyQuery {
+    token: Option<String>,
+}
+
+/// `GET /verify?token=...` -- the link people click in their email.
+///
+/// A plain route rather than a Leptos page on purpose: this is the one flow that must work
+/// in whatever client opens the link, including previewers with no JavaScript. It settles
+/// the account and redirects to the login page with a flag for the message to show.
+pub async fn verify_email(
+    State(state): State<AppState>,
+    Query(query): Query<VerifyQuery>,
+) -> Response {
+    let Some(token) = query.token.filter(|t| !t.trim().is_empty()) else {
+        return redirect_to_login("missing");
+    };
+
+    match auth::consume_verification(&state.pool, &token).await {
+        Ok(Ok(email)) => {
+            tracing::info!(%email, "email address verified");
+            redirect_to_login("verified")
+        }
+        Ok(Err(auth::VerifyFailure::Expired)) => redirect_to_login("expired"),
+        Ok(Err(auth::VerifyFailure::AlreadyUsed)) => redirect_to_login("used"),
+        Ok(Err(auth::VerifyFailure::Unknown)) => redirect_to_login("invalid"),
+        Err(e) => {
+            tracing::error!(error = %e, "verification lookup failed");
+            redirect_to_login("error")
+        }
+    }
+}
+
+fn redirect_to_login(status: &str) -> Response {
+    (
+        StatusCode::SEE_OTHER,
+        [(
+            axum::http::header::LOCATION,
+            format!("/login?verify={status}"),
+        )],
+    )
+        .into_response()
 }
 
 /// Compares without an early exit, so a wrong token cannot be recovered byte by byte.

@@ -15,7 +15,8 @@ Built with [Leptos](https://leptos.dev) 0.8 (SSR + hydration) on Axum, backed by
   same run on demand.
 - **Price history** — a multi-series SVG chart and a filterable table, including failed
   fetches so a broken selector is visible rather than silently absent.
-- **Email + password auth** — server-side sessions, argon2 hashes, per-user data.
+- **Email + password auth** — server-side sessions, argon2 hashes, per-user data, with
+  address verification by email before an account can be used.
 
 ## Requirements
 
@@ -33,7 +34,33 @@ cargo sqlx migrate run           # apply migrations/
 cargo leptos watch               # http://127.0.0.1:3000
 ```
 
-Then create an account at `/signup`, add an item, and give it a retailer.
+Then create an account at `/signup`. Signing up sends a confirmation link; **with no
+`RESEND_API_KEY` set the link is written to the log instead of emailed**, so local
+development needs no Resend account:
+
+```
+WARN pricey::server::email: RESEND_API_KEY is not set; logging the verification link
+     instead of sending it recipient=you@example.com link=http://127.0.0.1:3000/verify?token=...
+```
+
+Open that link, sign in, then add an item and give it a retailer.
+
+### Email verification
+
+An account cannot sign in until its address is confirmed — that is what stops a stranger
+registering with a throwaway or someone else's address.
+
+- Signup creates the account but **no session**, and emails a link valid for 24 hours
+- `GET /verify?token=…` consumes the token and redirects to `/login?verify=…`; it is a
+  plain route, not a Leptos page, so it works in any client that opens the link
+- Tokens are single-use, and only their **SHA-256 is stored** — the token itself exists
+  only in the email, so a leaked database backup cannot be used to verify accounts
+- `/login` offers a "send a new link" form when that is actually the problem. It reports
+  the same result for every address and is rate limited, so it is neither an
+  account-existence oracle nor a way to have this service repeatedly mail a third party
+
+To send real mail, set `RESEND_API_KEY` and `EMAIL_FROM` (the from-address must be on a
+domain verified in Resend), and `APP_BASE_URL` so links point at the right host.
 
 ### Adding a retailer
 
@@ -145,6 +172,9 @@ Environment variables to set on the Vercel project:
 | `DATABASE_URL` | Neon's **pooled** (`-pooler`) connection string, with `?sslmode=require` |
 | `CRON_SECRET` | Shared secret for `/api/fetch-prices`; Vercel Cron sends it automatically |
 | `APP_ENV` | Set to `production` so session cookies are marked `Secure` |
+| `APP_BASE_URL` | Public URL of the deployment; verification links are built from it |
+| `RESEND_API_KEY` | Resend API key. **Without it, links are logged rather than sent** |
+| `EMAIL_FROM` | Sender address, on a domain verified in Resend |
 
 Migrations run automatically at startup, so a fresh Neon branch provisions itself on the
 first boot. `vercel.json` schedules the daily price check (the free tier allows one cron

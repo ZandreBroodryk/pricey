@@ -51,5 +51,6 @@ ENV LEPTOS_OUTPUT_NAME=pricey \
 USER pricey
 EXPOSE 8080
 
-# PORT, when the platform sets it, overrides LEPTOS_SITE_ADDR (see src/main.rs).
+# PORT overrides LEPTOS_SITE_ADDR (see src/main.rs). Vercel does not set it for you: the
+# project must define PORT=8080, or its router aims at port 80 and every request fails.
 CMD ["/app/pricey"]

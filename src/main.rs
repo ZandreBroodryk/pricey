@@ -27,8 +27,10 @@ async fn main() {
     let conf = get_configuration(None).unwrap();
     let leptos_options = conf.leptos_options;
 
-    // Vercel injects PORT and expects the container to bind it on all interfaces;
-    // locally there is no PORT and cargo-leptos' site-addr is the right answer.
+    // Vercel routes container traffic to port 80 unless the project sets PORT, and that
+    // same variable is what tells us where to listen -- so the deployment needs PORT=8080
+    // configured on the project to agree with the image (see the README). Locally there is
+    // no PORT and cargo-leptos' site-addr is the right answer.
     let addr = match std::env::var("PORT")
         .ok()
         .and_then(|p| p.parse::<u16>().ok())

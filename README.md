@@ -169,12 +169,21 @@ Environment variables to set on the Vercel project:
 
 | Variable | Notes |
 |---|---|
+| `PORT` | **Required — set it to `8080`.** See the note below |
 | `DATABASE_URL` | Neon's **pooled** (`-pooler`) connection string, with `?sslmode=require` |
 | `CRON_SECRET` | Shared secret for `/api/fetch-prices`; Vercel Cron sends it automatically |
 | `APP_ENV` | Set to `production` so session cookies are marked `Secure` |
 | `APP_BASE_URL` | Public URL of the deployment; verification links are built from it |
 | `RESEND_API_KEY` | Resend API key. **Without it, links are logged rather than sent** |
 | `EMAIL_FROM` | Sender address, on a domain verified in Resend |
+
+`PORT` is not optional and not injected for you. Vercel routes container traffic to
+**port 80** unless the project defines a `PORT` environment variable, and that same variable
+is what the container reads to decide where to listen (`src/main.rs`). The image binds 8080
+and runs as a non-root user that cannot take a privileged port, so the two only agree when
+`PORT=8080` is set on the project. Leave it unset and every route — pages, static assets and
+`/api/*` alike — fails with `INTERNAL_FUNCTION_INVOCATION_FAILED`, because nothing is
+listening where the router is knocking.
 
 Migrations run automatically at startup, so a fresh Neon branch provisions itself on the
 first boot. `vercel.json` schedules the daily price check (the free tier allows one cron

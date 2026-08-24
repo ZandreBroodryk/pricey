@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        select s.id, s.label, s.url, s.css_selector, s.price_regex, s.active,\n               p.ok as \"latest_ok?\", p.price_cents as \"latest_price_cents?\",\n               p.error as \"latest_error?\", p.fetched_at as \"latest_fetched_at?\"\n        from item_sources s\n        left join lateral (\n            select ok, price_cents, error, fetched_at\n            from price_snapshots\n            where source_id = s.id\n            order by fetched_at desc\n            limit 1\n        ) p on true\n        where s.item_id = $1\n        order by lower(s.label)\n        ",
+  "query": "\n        select s.id, s.label, s.url, s.css_selector, s.price_regex, s.active, s.manual,\n               p.ok as \"latest_ok?\", p.price_cents as \"latest_price_cents?\",\n               p.error as \"latest_error?\", p.fetched_at as \"latest_fetched_at?\",\n               p.manual as \"latest_manual?\"\n        from item_sources s\n        left join lateral (\n            select ok, price_cents, error, fetched_at, manual\n            from price_snapshots\n            where source_id = s.id\n            order by fetched_at desc\n            limit 1\n        ) p on true\n        where s.item_id = $1\n        order by lower(s.label)\n        ",
   "describe": {
     "columns": [
       {
@@ -71,6 +71,17 @@
       },
       {
         "ordinal": 6,
+        "name": "manual",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "item_sources",
+            "name": "manual"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
         "name": "latest_ok?",
         "type_info": "Bool",
         "origin": {
@@ -81,7 +92,7 @@
         }
       },
       {
-        "ordinal": 7,
+        "ordinal": 8,
         "name": "latest_price_cents?",
         "type_info": "Int8",
         "origin": {
@@ -92,7 +103,7 @@
         }
       },
       {
-        "ordinal": 8,
+        "ordinal": 9,
         "name": "latest_error?",
         "type_info": "Text",
         "origin": {
@@ -103,13 +114,24 @@
         }
       },
       {
-        "ordinal": 9,
+        "ordinal": 10,
         "name": "latest_fetched_at?",
         "type_info": "Timestamptz",
         "origin": {
           "Table": {
             "table": "price_snapshots",
             "name": "fetched_at"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "latest_manual?",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "price_snapshots",
+            "name": "manual"
           }
         }
       }
@@ -127,10 +149,12 @@
       true,
       false,
       false,
+      false,
       true,
       true,
+      false,
       false
     ]
   },
-  "hash": "209caf96d9e9375d11d96496a879995fecb621e472ee778bb1966bd98456a991"
+  "hash": "d77378e65d411b8671bfce908b8fac472dec6fc7c579d4fd11ed9c885a86cdc6"
 }

@@ -85,19 +85,63 @@ meta[itemprop="price"]                     best, when the page provides it
 
 ### If a retailer returns HTTP 403
 
-Sites behind Cloudflare reject requests that carry a browser `User-Agent` but omit the
-headers a browser sends with it — the *mismatch* is what looks automated. The client in
-`src/server/price.rs` therefore sends a full navigation header set (`Sec-Fetch-Dest` is the
-one that matters in practice).
+Three different problems wear the same status code, and the fix depends on which one it is.
 
-A 403 that appears only under load is a different problem: rate limiting. Sources are
-grouped by host and each host is fetched serially with a short gap
-(`SAME_HOST_DELAY` in `src/server/runner.rs`) so tracking several products at one shop does
-not trip it. If a retailer is stricter, raise that value.
+**Every request fails, everywhere.** Sites behind Cloudflare reject requests that carry a
+browser `User-Agent` but omit the headers a browser sends with it — the *mismatch* is what
+looks automated. The client in `src/server/price.rs` already sends a full navigation header
+set (`Sec-Fetch-Dest` is the one that matters in practice).
+
+**Only under load.** That is rate limiting. Sources are grouped by host and each host is
+fetched serially with a short gap (`SAME_HOST_DELAY` in `src/server/runner.rs`) so tracking
+several products at one shop does not trip it. If a retailer is stricter, raise that value.
+
+**Fails from the deployed host, works locally.** The retailer blocks your host's IP range,
+and no header set will change that — the request never gets to be judged on its shape.
+Wootware blocks Vercel's egress this way. Use manual entry (below).
 
 Some sites render prices with JavaScript. Those cannot be scraped this way at all, since
 only the served HTML is parsed — look for a `<meta itemprop="price">` tag or a JSON-LD
 block in the page source instead.
+
+### Retailers you have to enter by hand
+
+Tick **"Enter prices by hand"** on the source and **save** it. It is then skipped by every
+refresh — cron, "Refresh all" and the per-item button — so it stops recording a failure
+every run, but it still counts toward the item's best price and still draws its line on the
+chart. This is separate from unticking "Include this retailer", which drops it out of the
+best-price comparison entirely.
+
+Saving is what makes the entry panel appear, and the order matters: until the flag is
+stored, cron is still refreshing that retailer, so there would be nothing manual about it
+yet.
+
+Two ways to get a price in, both on the source's editor:
+
+- **Paste the page source.** Open the product page in your browser, `Ctrl+U`, `Ctrl+A`,
+  `Ctrl+C`, paste, and press *Extract & record*. The CSS selector in the field above runs
+  against what you pasted through the same `price::extract` the scraper uses, so the price
+  is read and normalised identically — you are only supplying the fetch the server cannot
+  make. It is the selector as shown, not as last saved, so you can adjust it and paste
+  again without saving in between. Keep one configured for this reason; it is optional in
+  manual mode, not useless.
+- **Type the price.** `R 1 299,00`, `1299`, whatever the page showed — the same parser
+  handles it, and `Enter` records rather than saving the row. This is the practical option
+  on a phone, where viewing page source is not.
+
+Both report the number they stored, which is worth reading: the parser takes the first run
+of digits it finds, so a page that says "Was R1 999, now R899" records 1999 unless you give
+it just the price. Both are stored marked `manual`, and show a **manual** badge in the
+history table so a number you supplied is never mistaken for one the tracker measured.
+
+A pasted page is capped at 4 MB, and only `/api/sources/record-html` accepts a body that
+large — every other server function keeps Axum's default, so a login endpoint cannot be
+made to buffer a multi-megabyte body.
+
+An iframe, for the record, cannot substitute for this: retailers send `X-Frame-Options`
+(Wootware sends `SAMEORIGIN`), so the page will not render on this origin at all, and even
+if it did, a cross-origin document is unreadable to JavaScript — no selector could reach
+into it.
 
 ## Database
 

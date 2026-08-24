@@ -35,12 +35,13 @@ pub async fn item_history(item_id: String) -> Result<ItemHistory, ServerFnError>
     // broken selector is visible in the editor rather than just missing from the chart.
     let source_rows = sqlx::query!(
         r#"
-        select s.id, s.label, s.url, s.css_selector, s.price_regex, s.active,
+        select s.id, s.label, s.url, s.css_selector, s.price_regex, s.active, s.manual,
                p.ok as "latest_ok?", p.price_cents as "latest_price_cents?",
-               p.error as "latest_error?", p.fetched_at as "latest_fetched_at?"
+               p.error as "latest_error?", p.fetched_at as "latest_fetched_at?",
+               p.manual as "latest_manual?"
         from item_sources s
         left join lateral (
-            select ok, price_cents, error, fetched_at
+            select ok, price_cents, error, fetched_at, manual
             from price_snapshots
             where source_id = s.id
             order by fetched_at desc
@@ -63,6 +64,7 @@ pub async fn item_history(item_id: String) -> Result<ItemHistory, ServerFnError>
                 price_cents: r.latest_price_cents,
                 error: r.latest_error,
                 fetched_at: fetched_at.timestamp_millis(),
+                manual: r.latest_manual.unwrap_or(false),
             }),
             id: r.id.to_string(),
             item_id: item_id.to_string(),
@@ -71,6 +73,7 @@ pub async fn item_history(item_id: String) -> Result<ItemHistory, ServerFnError>
             css_selector: r.css_selector,
             price_regex: r.price_regex,
             active: r.active,
+            manual: r.manual,
         })
         .collect();
 
@@ -79,7 +82,8 @@ pub async fn item_history(item_id: String) -> Result<ItemHistory, ServerFnError>
     let snapshots = sqlx::query!(
         r#"
         select s.id as "source_id!", s.label as "label!",
-               p.price_cents, p.ok as "ok!", p.error, p.fetched_at as "fetched_at!"
+               p.price_cents, p.ok as "ok!", p.error, p.fetched_at as "fetched_at!",
+               p.manual as "manual!"
         from price_snapshots p
         join item_sources s on s.id = p.source_id
         where s.item_id = $1
@@ -100,6 +104,7 @@ pub async fn item_history(item_id: String) -> Result<ItemHistory, ServerFnError>
             price_cents: r.price_cents,
             ok: r.ok,
             error: r.error.clone(),
+            manual: r.manual,
         })
         .collect();
 

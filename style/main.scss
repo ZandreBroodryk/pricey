@@ -353,6 +353,12 @@ tr.row-failed td {
 	border-color: currentColor;
 }
 
+// A price the user supplied rather than one the tracker measured.
+.badge-manual {
+	color: var(--accent);
+	border-color: currentColor;
+}
+
 // --- source editor -------------------------------------------------------------
 
 .sources {
@@ -391,6 +397,35 @@ tr.row-failed td {
 	align-items: center;
 	gap: 0.6rem;
 	margin-top: 0.75rem;
+}
+
+// Manual price entry, shown only for retailers that block the tracker.
+.source-manual {
+	display: flex;
+	flex-direction: column;
+	gap: 0.6rem;
+	margin-top: 0.75rem;
+	padding-top: 0.75rem;
+	border-top: 1px dashed var(--border);
+
+	textarea {
+		font: inherit;
+		font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+		font-size: 0.8rem;
+		width: 100%;
+		resize: vertical;
+		color: var(--text);
+		background: var(--bg);
+		border: 1px solid var(--border);
+		border-radius: var(--radius);
+		padding: 0.4rem 0.5rem;
+	}
+
+	// These sit inside the block, so they do not need the top margin the row's own
+	// action bar carries.
+	.source-actions {
+		margin-top: 0;
+	}
 }
 
 .source-status {

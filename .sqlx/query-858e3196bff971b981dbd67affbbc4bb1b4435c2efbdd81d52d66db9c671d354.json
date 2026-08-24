@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        select s.id, s.url, s.css_selector, s.price_regex\n        from item_sources s\n        join wishlist_items i on i.id = s.item_id\n        where i.user_id = $1 and s.active and i.active\n        ",
+  "query": "\n        select s.id, s.url, s.css_selector, s.price_regex\n        from item_sources s\n        join wishlist_items i on i.id = s.item_id\n        where s.active and i.active and not s.manual\n        ",
   "describe": {
     "columns": [
       {
@@ -49,9 +49,7 @@
       }
     ],
     "parameters": {
-      "Left": [
-        "Uuid"
-      ]
+      "Left": []
     },
     "nullable": [
       false,
@@ -60,5 +58,5 @@
       true
     ]
   },
-  "hash": "816d179ab213a0ea056be1d8d1345bf171e908bbd0ea884f664746e398361b3e"
+  "hash": "858e3196bff971b981dbd67affbbc4bb1b4435c2efbdd81d52d66db9c671d354"
 }

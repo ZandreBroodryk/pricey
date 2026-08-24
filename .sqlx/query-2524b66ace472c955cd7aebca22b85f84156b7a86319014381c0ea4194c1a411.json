@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        insert into price_snapshots (source_id, price_cents, ok, manual)\n        select s.id, $3, true, true\n        from item_sources s\n        join wishlist_items i on i.id = s.item_id\n        where s.id = $1 and i.user_id = $2\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2524b66ace472c955cd7aebca22b85f84156b7a86319014381c0ea4194c1a411"
+}

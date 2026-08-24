@@ -10,7 +10,7 @@ use crate::components::action_error;
 use crate::components::chart::PriceChart;
 use crate::components::price_table::PriceTable;
 use crate::fmt::{format_cents, format_datetime};
-use crate::models::{ItemSource, SourceInput};
+use crate::models::{ItemHistory, ItemSource, SourceInput};
 
 /// What a [`SourceEditor`] needs from the page it sits on, bundled into one prop.
 ///
@@ -72,92 +72,141 @@ pub fn ItemDetailPage() -> impl IntoView {
             </Show>
 
             <Transition fallback=|| view! { <p class="loading">"Loading..."</p> }>
-                {move || {
-                    history.get().map(|result| match result {
-                        Err(e) => view! {
-                            <p class="error" role="alert">{e.to_string()}</p>
-                        }.into_any(),
-                        Ok(history) => {
-                            let item = history.item;
-                            let currency = item.currency.clone();
-                            let id = item.id.clone();
-
-                            let best = item
-                                .best
-                                .as_ref()
-                                .map(|b| {
-                                    format!(
-                                        "{} at {} ({})",
-                                        format_cents(b.price_cents, &currency),
-                                        b.label,
-                                        format_datetime(b.fetched_at),
-                                    )
-                                })
-                                .unwrap_or_else(|| "No price recorded yet".to_string());
-
-                            let target = StoredValue::new(item.target_price_cents.map(|cents| {
-                                format!("Target {}", format_cents(cents, &currency))
-                            }));
-
-                            let refresh_id = id.clone();
-
-                            view! {
-                                <div class="page-head">
-                                    <div>
-                                        <h1>{item.name}</h1>
-                                        <p class="subtitle">{best}</p>
-                                        <Show when=move || target.with_value(Option::is_some)>
-                                            <p class="muted">{move || target.get_value()}</p>
-                                        </Show>
-                                    </div>
-                                    <button
-                                        class="secondary"
-                                        disabled=move || refresh.pending().get()
-                                        on:click=move |_| {
-                                            refresh.dispatch(RefreshItemNow {
-                                                item_id: refresh_id.clone(),
-                                            });
-                                        }
-                                    >
-                                        {move || if refresh.pending().get() {
-                                            "Refreshing..."
-                                        } else {
-                                            "Refresh now"
-                                        }}
-                                    </button>
-                                </div>
-
-                                <h2>"Retailers"</h2>
-                                <p class="muted">
-                                    "Each retailer needs a CSS selector pointing at the price on \
-                                     its page. Use Test to check one before saving. If a retailer \
-                                     blocks this tracker, tick \"Enter prices by hand\" and supply \
-                                     its prices yourself."
-                                </p>
-                                <div class="sources">
-                                    {item.sources
-                                        .into_iter()
-                                        .map(|source| view! {
-                                            <SourceEditor
-                                                item_id=id.clone()
-                                                source=source
-                                                actions=actions
-                                            />
-                                        })
-                                        .collect::<Vec<_>>()}
-                                    <SourceEditor item_id=id.clone() actions=actions/>
-                                </div>
-
-                                <h2>"Price history"</h2>
-                                <PriceChart series=history.series currency=currency.clone()/>
-                                <PriceTable rows=history.rows currency=currency/>
-                            }
-                            .into_any()
-                        }
-                    })
-                }}
+                <ItemBody
+                    item_id=Signal::derive(item_id)
+                    history=history
+                    refresh=refresh
+                    actions=actions
+                />
             </Transition>
         </section>
+    }
+}
+
+/// The loaded page.
+///
+/// Split out from [`ItemDetailPage`] so the signals below are created *inside* the
+/// `<Transition/>`. A resource read only registers with a suspense boundary when the owner
+/// it runs under is that boundary's, and a `Memo` runs under the owner it was created in --
+/// so memos over `history` have to be born in here, not in the parent.
+#[component]
+fn ItemBody(
+    item_id: Signal<String>,
+    history: Resource<Result<ItemHistory, ServerFnError>>,
+    refresh: ServerAction<RefreshItemNow>,
+    actions: SourceActions,
+) -> impl IntoView {
+    // The resource is read once, here, and everything below is derived from it. That is
+    // what lets the retailer rows be driven by signals instead of rebuilt on every refetch:
+    // recording a price refetches the page, and a rebuild would throw away the notice the
+    // row had just put up along with any edits in progress in the other rows.
+    let loaded = Memo::new(move |_| match history.get() {
+        Some(Ok(history)) => Some(history),
+        _ => None,
+    });
+    let load_error = move || match history.get() {
+        Some(Err(e)) => Some(e.to_string()),
+        _ => None,
+    };
+    let sources = Memo::new(move |_| {
+        loaded
+            .get()
+            .map(|history| history.item.sources)
+            .unwrap_or_default()
+    });
+
+    let name = move || loaded.get().map(|h| h.item.name).unwrap_or_default();
+    let best = move || {
+        loaded
+            .get()
+            .map(|h| {
+                h.item
+                    .best
+                    .map(|b| {
+                        format!(
+                            "{} at {} ({})",
+                            format_cents(b.price_cents, &h.item.currency),
+                            b.label,
+                            format_datetime(b.fetched_at),
+                        )
+                    })
+                    .unwrap_or_else(|| "No price recorded yet".to_string())
+            })
+            .unwrap_or_default()
+    };
+    let target = move || {
+        loaded.get().and_then(|h| {
+            h.item
+                .target_price_cents
+                .map(|cents| format!("Target {}", format_cents(cents, &h.item.currency)))
+        })
+    };
+
+    view! {
+        <Show when=move || load_error().is_some()>
+            <p class="error" role="alert">{load_error}</p>
+        </Show>
+
+        <Show when=move || loaded.with(Option::is_some)>
+            <div class="page-head">
+                <div>
+                    <h1>{name}</h1>
+                    <p class="subtitle">{best}</p>
+                    <Show when=move || target().is_some()>
+                        <p class="muted">{target}</p>
+                    </Show>
+                </div>
+                <button
+                    class="secondary"
+                    disabled=move || refresh.pending().get()
+                    on:click=move |_| {
+                        refresh.dispatch(RefreshItemNow { item_id: item_id.get() });
+                    }
+                >
+                    {move || if refresh.pending().get() {
+                        "Refreshing..."
+                    } else {
+                        "Refresh now"
+                    }}
+                </button>
+            </div>
+
+            <h2>"Retailers"</h2>
+            <p class="muted">
+                "Each retailer needs a CSS selector pointing at the price on its page. Use \
+                 Test to check one before saving. If a retailer blocks this tracker, tick \
+                 \"Enter prices by hand\", save, and supply its prices yourself."
+            </p>
+            <div class="sources">
+                <For
+                    each=move || sources.get()
+                    key=|source: &ItemSource| source.id.clone()
+                    children=move |source| {
+                        // The row reads itself back out of the list rather than closing over
+                        // this value. It is deliberately not rebuilt when the list refetches
+                        // -- that is what preserves what the user has typed -- so a save or a
+                        // newly recorded price has to reach it as a signal.
+                        let id = source.id.clone();
+                        let stored = Signal::derive(move || {
+                            sources.with(|list| list.iter().find(|s| s.id == id).cloned())
+                        });
+                        view! {
+                            <SourceEditor item_id=item_id source=stored actions=actions/>
+                        }
+                    }
+                />
+                <SourceEditor item_id=item_id actions=actions/>
+            </div>
+
+            {move || loaded.get().map(|h| {
+                let currency = h.item.currency;
+                view! {
+                    <h2>"Price history"</h2>
+                    <PriceChart series=h.series currency=currency.clone()/>
+                    <PriceTable rows=h.rows currency=currency/>
+                }
+            })}
+        </Show>
     }
 }
 
@@ -165,8 +214,15 @@ pub fn ItemDetailPage() -> impl IntoView {
 /// two paths cannot drift apart in validation or layout.
 #[component]
 fn SourceEditor(
-    item_id: String,
-    #[prop(optional)] source: Option<ItemSource>,
+    item_id: Signal<String>,
+    /// The stored row this editor edits; `None` is the "add a retailer" row.
+    ///
+    /// It arrives as a signal rather than a value because the row outlives the page's
+    /// fetches: not rebuilding it is what keeps a half-typed selector and a just-shown
+    /// "recorded" notice alive across a refetch, so saved values and the latest snapshot
+    /// have to reach it this way instead.
+    #[prop(optional)]
+    source: Option<Signal<Option<ItemSource>>>,
     actions: SourceActions,
 ) -> impl IntoView {
     let SourceActions {
@@ -176,25 +232,36 @@ fn SourceEditor(
         recorded,
     } = actions;
 
-    let existing_id = source.as_ref().map(|s| s.id.clone());
-    let is_new = existing_id.is_none();
+    let initial = source.and_then(|s| s.get_untracked());
+    let existing_id = StoredValue::new(initial.as_ref().map(|s| s.id.clone()));
+    let is_new = existing_id.with_value(Option::is_none);
 
-    let label = RwSignal::new(source.as_ref().map(|s| s.label.clone()).unwrap_or_default());
-    let url = RwSignal::new(source.as_ref().map(|s| s.url.clone()).unwrap_or_default());
+    // Editable state, seeded from the stored row and then left alone -- re-seeding it when
+    // the page refetches would overwrite whatever is being typed.
+    let label = RwSignal::new(initial.as_ref().map(|s| s.label.clone()).unwrap_or_default());
+    let url = RwSignal::new(initial.as_ref().map(|s| s.url.clone()).unwrap_or_default());
     let selector = RwSignal::new(
-        source
+        initial
             .as_ref()
             .map(|s| s.css_selector.clone())
             .unwrap_or_default(),
     );
     let regex = RwSignal::new(
-        source
+        initial
             .as_ref()
             .and_then(|s| s.price_regex.clone())
             .unwrap_or_default(),
     );
-    let active = RwSignal::new(source.as_ref().map(|s| s.active).unwrap_or(true));
-    let manual = RwSignal::new(source.as_ref().map(|s| s.manual).unwrap_or(false));
+    let active = RwSignal::new(initial.as_ref().map(|s| s.active).unwrap_or(true));
+    let manual = RwSignal::new(initial.as_ref().map(|s| s.manual).unwrap_or(false));
+
+    // Reactive views of what is *saved*, as opposed to what is currently in the fields.
+    let stored = move || source.and_then(|s| s.get());
+    let latest = move || stored().and_then(|s| s.latest);
+    // The manual panel follows the saved flag rather than the checkbox: until the source is
+    // saved as manual the runner still refreshes it every hour, so offering to record its
+    // prices by hand would be describing a state that does not exist yet.
+    let is_manual = move || stored().is_some_and(|s| s.manual);
 
     // Testing is per row: a shared action would splash one row's result across all of them.
     // Recording is per row for the same reason -- with two manual retailers on one item, a
@@ -218,13 +285,11 @@ fn SourceEditor(
         }
     });
     Effect::new(move |_| {
-        if matches!(record_price.value().get(), Some(Ok(()))) {
+        if matches!(record_price.value().get(), Some(Ok(_))) {
             typed_price.set(String::new());
             recorded.update(|n| *n += 1);
         }
     });
-
-    let latest = source.as_ref().and_then(|s| s.latest.clone());
 
     let gather = move || SourceInput {
         label: label.get(),
@@ -235,56 +300,76 @@ fn SourceEditor(
         manual: manual.get(),
     };
 
-    let save = {
-        let item_id = item_id.clone();
-        let existing_id = existing_id.clone();
-        move |ev: leptos::ev::SubmitEvent| {
-            ev.prevent_default();
-            match &existing_id {
-                Some(id) => {
-                    update.dispatch(UpdateSource {
-                        id: id.clone(),
-                        input: gather(),
-                    });
-                }
-                None => {
-                    create.dispatch(CreateSource {
-                        item_id: item_id.clone(),
-                        input: gather(),
-                    });
-                    // Clear the row so it is ready for the next retailer.
-                    label.set(String::new());
-                    url.set(String::new());
-                    selector.set(String::new());
-                    regex.set(String::new());
-                    manual.set(false);
-                }
+    let save = move |ev: leptos::ev::SubmitEvent| {
+        ev.prevent_default();
+        match existing_id.get_value() {
+            Some(id) => {
+                update.dispatch(UpdateSource {
+                    id,
+                    input: gather(),
+                });
+            }
+            None => {
+                create.dispatch(CreateSource {
+                    item_id: item_id.get(),
+                    input: gather(),
+                });
+                // Clear the row so it is ready for the next retailer.
+                label.set(String::new());
+                url.set(String::new());
+                selector.set(String::new());
+                regex.set(String::new());
+                manual.set(false);
             }
         }
     };
 
-    let on_delete = {
-        let existing_id = existing_id.clone();
-        move |_| {
-            if let Some(id) = &existing_id {
-                remove.dispatch(DeleteSource { id: id.clone() });
-            }
+    let on_delete = move |_| {
+        if let Some(id) = existing_id.get_value() {
+            remove.dispatch(DeleteSource { id });
         }
+    };
+
+    // Both ways of triggering each manual path go through one closure, so the button and
+    // the keyboard cannot end up doing different things.
+    let recording_typed = move || {
+        record_price.pending().get() || typed_price.with(|p| p.trim().is_empty())
+    };
+    let record_typed = move || {
+        let Some(id) = existing_id.get_value() else {
+            return;
+        };
+        if record_price.pending().get_untracked()
+            || typed_price.with_untracked(|p| p.trim().is_empty())
+        {
+            return;
+        }
+        record_price.dispatch(RecordPrice {
+            source_id: id,
+            price: typed_price.get_untracked(),
+        });
+    };
+    let record_pasted = move || {
+        let Some(id) = existing_id.get_value() else {
+            return;
+        };
+        record_html.dispatch(RecordFromHtml {
+            source_id: id,
+            html: pasted_html.get_untracked(),
+            // The selector as it is shown, the same one Test would use. The field is
+            // editable and sits right above the paste box, so reading the stored selector
+            // instead would extract with something the user is not looking at.
+            css_selector: selector.get_untracked(),
+            price_regex: Some(regex.get_untracked()).filter(|r| !r.trim().is_empty()),
+        });
     };
 
     let test_result = move || extraction_result(test.value().get(), "Read");
-
-    // Shown in the row rather than the page banner, since the action is per row.
-    let typed_result = move || {
-        record_price.value().get().map(|result| match result {
-            Err(e) => {
-                view! { <p class="error">{action_error(Some(Err::<(), _>(e)))}</p> }.into_any()
-            }
-            Ok(()) => view! { <p class="notice">"Price recorded."</p> }.into_any(),
-        })
-    };
-    // Same shape, same diagnostics -- only the verb differs, because this one recorded it.
+    // Shown in the row rather than the page banner, since the actions are per row. Both
+    // report the price that was stored, which for a typed one is the only chance to notice
+    // that "Was R1 999, now R899" parsed as 1999.
     let paste_result = move || extraction_result(record_html.value().get(), "Recorded");
+    let typed_result = move || extraction_result(record_price.value().get(), "Recorded");
 
     view! {
         <form class="source-editor" class:is-new=is_new on:submit=save>
@@ -363,15 +448,15 @@ fn SourceEditor(
                     </button>
                 </Show>
                 <Show when=move || !is_new>
-                    <button type="button" class="danger linklike" on:click=on_delete.clone()>
+                    <button type="button" class="danger linklike" on:click=on_delete>
                         "Delete"
                     </button>
                 </Show>
             </div>
 
-            // Only offered once the source exists, since recording needs its id and its
-            // stored selector.
-            <Show when=move || manual.get() && !is_new>
+            // Offered once the source is *saved* as manual: recording needs its id, and
+            // until the flag is stored the runner is still refreshing this retailer.
+            <Show when=move || is_manual()>
                 <div class="source-manual">
                     <label class="wide">
                         "Page source"
@@ -394,16 +479,7 @@ fn SourceEditor(
                                 record_html.pending().get()
                                     || pasted_html.with(|h| h.trim().is_empty())
                             }
-                            on:click={
-                                let existing_id = existing_id.clone();
-                                move |_| {
-                                    let Some(id) = existing_id.clone() else { return };
-                                    record_html.dispatch(RecordFromHtml {
-                                        source_id: id,
-                                        html: pasted_html.get(),
-                                    });
-                                }
-                            }
+                            on:click=move |_| record_pasted()
                         >
                             {move || if record_html.pending().get() {
                                 "Extracting..."
@@ -420,6 +496,16 @@ fn SourceEditor(
                             placeholder="R 1 299,00"
                             prop:value=typed_price
                             on:input=move |ev| typed_price.set(event_target_value(&ev))
+                            // This input sits inside the row's form, where Enter means
+                            // Save -- which would record nothing and clear the field, so
+                            // the price would silently never be written. On a phone, the
+                            // path this field exists for, Enter is the natural key here.
+                            on:keydown=move |ev| {
+                                if ev.key() == "Enter" {
+                                    ev.prevent_default();
+                                    record_typed();
+                                }
+                            }
                         />
                     </label>
 
@@ -427,20 +513,8 @@ fn SourceEditor(
                         <button
                             type="button"
                             class="secondary"
-                            disabled=move || {
-                                record_price.pending().get()
-                                    || typed_price.with(|p| p.trim().is_empty())
-                            }
-                            on:click={
-                                let existing_id = existing_id.clone();
-                                move |_| {
-                                    let Some(id) = existing_id.clone() else { return };
-                                    record_price.dispatch(RecordPrice {
-                                        source_id: id,
-                                        price: typed_price.get(),
-                                    });
-                                }
-                            }
+                            disabled=recording_typed
+                            on:click=move |_| record_typed()
                         >
                             {move || if record_price.pending().get() {
                                 "Recording..."
@@ -452,7 +526,7 @@ fn SourceEditor(
                 </div>
             </Show>
 
-            {move || latest.clone().map(|status| {
+            {move || latest().map(|status| {
                 if status.ok {
                     let price = status
                         .price_cents
@@ -486,11 +560,11 @@ fn SourceEditor(
     }
 }
 
-/// Renders the outcome of a selector run, whether it came from Test or from pasted HTML.
+/// Renders the outcome of a recorded or tested price, whoever produced it.
 ///
-/// `verb` is the only difference between the two: Test only "Read" a price, while pasting
-/// "Recorded" it. Cents are shown unformatted on purpose -- this is a diagnostic view, and
-/// the item's currency is not what is being checked.
+/// `verb` is the only difference between the callers: Test only "Read" a price, while the
+/// two manual paths "Recorded" it. Cents are shown unformatted on purpose -- this is a
+/// diagnostic view, and the item's currency is not what is being checked.
 fn extraction_result(
     value: Option<Result<crate::models::SourceTest, ServerFnError>>,
     verb: &'static str,

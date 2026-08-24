@@ -106,24 +106,37 @@ block in the page source instead.
 
 ### Retailers you have to enter by hand
 
-Tick **"Enter prices by hand"** on the source. It is then skipped by every refresh — cron,
-"Refresh all" and the per-item button — so it stops recording a failure every run, but it
-still counts toward the item's best price and still draws its line on the chart. This is
-separate from unticking "Include this retailer", which drops it out of the best-price
-comparison entirely.
+Tick **"Enter prices by hand"** on the source and **save** it. It is then skipped by every
+refresh — cron, "Refresh all" and the per-item button — so it stops recording a failure
+every run, but it still counts toward the item's best price and still draws its line on the
+chart. This is separate from unticking "Include this retailer", which drops it out of the
+best-price comparison entirely.
+
+Saving is what makes the entry panel appear, and the order matters: until the flag is
+stored, cron is still refreshing that retailer, so there would be nothing manual about it
+yet.
 
 Two ways to get a price in, both on the source's editor:
 
 - **Paste the page source.** Open the product page in your browser, `Ctrl+U`, `Ctrl+A`,
-  `Ctrl+C`, paste, and press *Extract & record*. The source's CSS selector runs against
-  what you pasted through the same `price::extract` the scraper uses, so the price is read
-  and normalised identically — you are only supplying the fetch the server cannot make.
-  Keep the selector configured for this reason; it is optional in manual mode, not useless.
+  `Ctrl+C`, paste, and press *Extract & record*. The CSS selector in the field above runs
+  against what you pasted through the same `price::extract` the scraper uses, so the price
+  is read and normalised identically — you are only supplying the fetch the server cannot
+  make. It is the selector as shown, not as last saved, so you can adjust it and paste
+  again without saving in between. Keep one configured for this reason; it is optional in
+  manual mode, not useless.
 - **Type the price.** `R 1 299,00`, `1299`, whatever the page showed — the same parser
-  handles it. This is the practical option on a phone, where viewing page source is not.
+  handles it, and `Enter` records rather than saving the row. This is the practical option
+  on a phone, where viewing page source is not.
 
-Both are stored marked `manual`, and show a **manual** badge in the history table so a
-number you supplied is never mistaken for one the tracker measured.
+Both report the number they stored, which is worth reading: the parser takes the first run
+of digits it finds, so a page that says "Was R1 999, now R899" records 1999 unless you give
+it just the price. Both are stored marked `manual`, and show a **manual** badge in the
+history table so a number you supplied is never mistaken for one the tracker measured.
+
+A pasted page is capped at 4 MB, and only `/api/sources/record-html` accepts a body that
+large — every other server function keeps Axum's default, so a login endpoint cannot be
+made to buffer a multi-megabyte body.
 
 An iframe, for the record, cannot substitute for this: retailers send `X-Frame-Options`
 (Wootware sends `SAMEORIGIN`), so the page will not render on this origin at all, and even

@@ -53,17 +53,25 @@ async fn main() {
         )
         // The link people click in their verification email.
         .route("/verify", get(routes::verify_email))
-        // Server functions are registered explicitly so they receive the database pool.
-        //
-        // The body limit is raised from Axum's 2 MB default because `sources/record-html`
-        // takes a whole product page pasted by the user, and a page can exceed that.
-        // `MAX_PASTED_HTML` in `api::sources` mirrors this number so an oversized paste is
-        // answered with a sentence rather than a bare 413.
+        // `sources/record-html` takes a whole product page pasted by the user, which does
+        // not fit Axum's 2 MB default. The raised limit is scoped to that one path rather
+        // than layered on the catch-all below: on the catch-all it would let *every*
+        // server function buffer that much, including `auth/login` and `auth/signup`,
+        // which no one has to be signed in to reach.
         .route(
-            "/api/{*fn_name}",
+            "/api/sources/record-html",
             get(routes::server_fn_handler)
                 .post(routes::server_fn_handler)
-                .layer(axum::extract::DefaultBodyLimit::max(8 * 1024 * 1024)),
+                .layer(axum::extract::DefaultBodyLimit::max(
+                    pricey::api::sources::RECORD_HTML_BODY_LIMIT,
+                )),
+        )
+        // Server functions are registered explicitly so they receive the database pool.
+        // A static path wins over this wildcard, so the route above still gets its own
+        // handler with its own limit.
+        .route(
+            "/api/{*fn_name}",
+            get(routes::server_fn_handler).post(routes::server_fn_handler),
         )
         .leptos_routes_with_handler(routes_list, get(routes::leptos_routes_handler))
         .fallback(leptos_axum::file_and_error_handler::<AppState, _>(shell))

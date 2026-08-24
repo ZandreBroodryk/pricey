@@ -30,7 +30,7 @@ pub fn deltas(rows: &[HistoryRow]) -> Vec<Option<i64>> {
 }
 
 #[component]
-pub fn PriceTable(rows: Vec<HistoryRow>, currency: String) -> impl IntoView {
+pub fn PriceTable(rows: Vec<HistoryRow>, currency: String) -> AnyView {
     // "" means every source.
     let filter = RwSignal::new(String::new());
 
@@ -132,6 +132,7 @@ pub fn PriceTable(rows: Vec<HistoryRow>, currency: String) -> impl IntoView {
             </Show>
         </div>
     }
+    .into_any()
 }
 
 #[cfg(test)]

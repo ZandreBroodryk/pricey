@@ -118,7 +118,7 @@ pub fn series_class(index: usize) -> String {
 }
 
 #[component]
-pub fn PriceChart(series: Vec<SourceSeries>, currency: String) -> impl IntoView {
+pub fn PriceChart(series: Vec<SourceSeries>, currency: String) -> AnyView {
     let hidden = RwSignal::new(HashSet::<String>::new());
     let series = StoredValue::new(series);
     let currency = StoredValue::new(currency);
@@ -285,12 +285,15 @@ pub fn PriceChart(series: Vec<SourceSeries>, currency: String) -> impl IntoView 
         .into_any()
     };
 
+    // Erased at the boundary like the rest of the view tree -- see the module docs on
+    // `pages::item_detail` for why an `impl IntoView` this deep does not compile in release.
     view! {
         <figure class="chart">
             <div class="chart-legend">{legend}</div>
             {plot}
         </figure>
     }
+    .into_any()
 }
 
 #[cfg(test)]

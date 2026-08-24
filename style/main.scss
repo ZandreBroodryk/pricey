@@ -426,6 +426,13 @@ tr.row-failed td {
 	.source-actions {
 		margin-top: 0;
 	}
+
+	// Each result sits directly under the control that produced it. The column's own
+	// gap does the spacing, so the paragraph's default margins would double it.
+	.notice,
+	.error {
+		margin: 0;
+	}
 }
 
 .source-status {

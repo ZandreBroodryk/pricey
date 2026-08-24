@@ -214,7 +214,7 @@ pub async fn record_price(source_id: String, price: String) -> Result<SourceTest
 /// shows it in an editable field: reading the stored one instead would extract with a
 /// selector the user is not looking at. It is not trusted for anything -- the only thing
 /// it can do is read the caller's own paste -- and ownership is still enforced in SQL by
-/// [`insert_manual_snapshot`].
+/// `insert_manual_snapshot`.
 ///
 /// A returned `price_cents` of `Some` means the price was recorded; `None` means nothing
 /// was recorded and `error`/`matched_text` say why.
@@ -251,7 +251,11 @@ pub async fn record_from_html(
 
     let selector = scraper::Selector::parse(css_selector)
         .map_err(|_| ServerFnError::new("That CSS selector is not valid."))?;
-    let regex = match price_regex.as_deref().map(str::trim).filter(|r| !r.is_empty()) {
+    let regex = match price_regex
+        .as_deref()
+        .map(str::trim)
+        .filter(|r| !r.is_empty())
+    {
         Some(r) => Some(
             regex::Regex::new(r)
                 .map_err(|e| ServerFnError::new(format!("That regex is not valid: {e}")))?,
@@ -281,7 +285,7 @@ const MAX_PASTED_HTML: usize = 4 * 1024 * 1024;
 
 /// Body limit for the `sources/record-html` route, applied in `main.rs`.
 ///
-/// It has to sit well *above* [`MAX_PASTED_HTML`] rather than alongside it. The page
+/// It has to sit well *above* `MAX_PASTED_HTML` rather than alongside it. The page
 /// arrives as one form-urlencoded field, and percent-encoding spends three bytes on every
 /// character that is not URL-safe -- which in HTML is most of them: `<`, `>`, `"`, `=`,
 /// spaces and newlines. A 4 MB page can therefore reach ~12 MB on the wire, so an equal

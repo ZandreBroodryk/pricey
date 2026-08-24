@@ -24,6 +24,9 @@ pub struct ItemSource {
     pub css_selector: String,
     pub price_regex: Option<String>,
     pub active: bool,
+    /// The tracker cannot reach this retailer, so its prices are supplied by hand.
+    /// Refreshes skip it entirely; the selector, when set, is used on pasted HTML.
+    pub manual: bool,
     /// Most recent snapshot for this source, successful or not.
     pub latest: Option<SourceStatus>,
 }
@@ -35,6 +38,10 @@ pub struct SourceStatus {
     pub price_cents: Option<i64>,
     pub error: Option<String>,
     pub fetched_at: i64,
+    /// Whether this particular snapshot was supplied by the user. Read from the snapshot
+    /// rather than the source so it stays right for one that was scraped before the
+    /// retailer started blocking us.
+    pub manual: bool,
 }
 
 /// The cheapest current price across an item's sources.
@@ -78,9 +85,11 @@ pub struct SourceInput {
     /// Blank means "derive it from the URL's host".
     pub label: String,
     pub url: String,
+    /// Required unless `manual`, where it is optional and only used on pasted HTML.
     pub css_selector: String,
     pub price_regex: Option<String>,
     pub active: bool,
+    pub manual: bool,
 }
 
 /// A single recorded price. Failed fetches are not points -- see [`HistoryRow`].
@@ -107,6 +116,8 @@ pub struct HistoryRow {
     pub price_cents: Option<i64>,
     pub ok: bool,
     pub error: Option<String>,
+    /// Supplied by the user rather than fetched by the tracker.
+    pub manual: bool,
 }
 
 /// Everything `/items/:id` needs to render.
@@ -125,7 +136,11 @@ pub struct RefreshReport {
     pub failed: usize,
 }
 
-/// Result of the "test this selector" button: what would be extracted, without recording it.
+/// What a selector extracted from a page.
+///
+/// Shared by two callers with the same shape: the "test this selector" button, which
+/// never records, and recording from pasted HTML, which records only when `price_cents`
+/// is `Some`. Either way a `None` carries `error`/`matched_text` to diagnose the selector.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SourceTest {
     pub price_cents: Option<i64>,

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        select s.id as \"source_id!\", s.label as \"label!\",\n               p.price_cents, p.ok as \"ok!\", p.error, p.fetched_at as \"fetched_at!\"\n        from price_snapshots p\n        join item_sources s on s.id = p.source_id\n        where s.item_id = $1\n        order by p.fetched_at desc\n        ",
+  "query": "\n        select s.id as \"source_id!\", s.label as \"label!\",\n               p.price_cents, p.ok as \"ok!\", p.error, p.fetched_at as \"fetched_at!\",\n               p.manual as \"manual!\"\n        from price_snapshots p\n        join item_sources s on s.id = p.source_id\n        where s.item_id = $1\n        order by p.fetched_at desc\n        ",
   "describe": {
     "columns": [
       {
@@ -68,6 +68,17 @@
             "name": "fetched_at"
           }
         }
+      },
+      {
+        "ordinal": 6,
+        "name": "manual!",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "price_snapshots",
+            "name": "manual"
+          }
+        }
       }
     ],
     "parameters": {
@@ -81,8 +92,9 @@
       true,
       false,
       true,
+      false,
       false
     ]
   },
-  "hash": "3b8c30cb01c771482f9addb1aab0b7363e57bb4c52b421d0731728e9e5734311"
+  "hash": "6da367a1bf0a1c97917312a37f4a5c7073a28cf539f065a8257b45e3e93fd26a"
 }

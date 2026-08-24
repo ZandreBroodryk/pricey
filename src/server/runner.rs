@@ -2,6 +2,10 @@
 //!
 //! Cron, the per-item button and the per-source button all funnel into [`run`], so there
 //! is exactly one implementation of "check these sources and write down what you found".
+//!
+//! Every loader here excludes `manual` sources. Those belong to retailers that block this
+//! host outright, so fetching them would only write a failed snapshot on every run; their
+//! prices come in through `api::sources::record_price` / `record_from_html` instead.
 
 use std::collections::HashMap;
 use std::time::Duration;
@@ -52,7 +56,7 @@ pub async fn refresh_all(pool: &PgPool) -> Result<RefreshReport, String> {
         select s.id, s.url, s.css_selector, s.price_regex
         from item_sources s
         join wishlist_items i on i.id = s.item_id
-        where s.active and i.active
+        where s.active and i.active and not s.manual
         "#
     )
     .fetch_all(pool)
@@ -70,7 +74,7 @@ pub async fn refresh_user(pool: &PgPool, user_id: Uuid) -> Result<RefreshReport,
         select s.id, s.url, s.css_selector, s.price_regex
         from item_sources s
         join wishlist_items i on i.id = s.item_id
-        where i.user_id = $1 and s.active and i.active
+        where i.user_id = $1 and s.active and i.active and not s.manual
         "#,
         user_id
     )
@@ -93,7 +97,7 @@ pub async fn refresh_item(
         select s.id, s.url, s.css_selector, s.price_regex
         from item_sources s
         join wishlist_items i on i.id = s.item_id
-        where s.item_id = $1 and i.user_id = $2 and s.active
+        where s.item_id = $1 and i.user_id = $2 and s.active and not s.manual
         "#,
         item_id,
         user_id
@@ -117,7 +121,7 @@ pub async fn refresh_source(
         select s.id, s.url, s.css_selector, s.price_regex
         from item_sources s
         join wishlist_items i on i.id = s.item_id
-        where s.id = $1 and i.user_id = $2
+        where s.id = $1 and i.user_id = $2 and not s.manual
         "#,
         source_id,
         user_id

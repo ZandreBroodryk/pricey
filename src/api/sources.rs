@@ -30,8 +30,8 @@ pub async fn create_source(item_id: String, input: SourceInput) -> Result<String
 
     let id = sqlx::query_scalar!(
         r#"
-        insert into item_sources (item_id, label, url, css_selector, price_regex, active)
-        values ($1, $2, $3, $4, $5, $6)
+        insert into item_sources (item_id, label, url, css_selector, price_regex, active, manual)
+        values ($1, $2, $3, $4, $5, $6, $7)
         returning id
         "#,
         item_id,
@@ -39,7 +39,8 @@ pub async fn create_source(item_id: String, input: SourceInput) -> Result<String
         input.url,
         input.css_selector,
         input.price_regex,
-        input.active
+        input.active,
+        input.manual
     )
     .fetch_one(&pool)
     .await
@@ -68,7 +69,7 @@ pub async fn update_source(id: String, input: SourceInput) -> Result<(), ServerF
         r#"
         update item_sources s
         set label = $3, url = $4, css_selector = $5, price_regex = $6, active = $7,
-            updated_at = now()
+            manual = $8, updated_at = now()
         from wishlist_items i
         where s.id = $1 and i.id = s.item_id and i.user_id = $2
         "#,
@@ -78,7 +79,8 @@ pub async fn update_source(id: String, input: SourceInput) -> Result<(), ServerF
         input.url,
         input.css_selector,
         input.price_regex,
-        input.active
+        input.active,
+        input.manual
     )
     .execute(&pool)
     .await
@@ -137,6 +139,16 @@ pub async fn test_source(input: SourceInput) -> Result<SourceTest, ServerFnError
     auth::require_user(&pool).await?;
     let input = validate(input)?;
 
+    // A manual source exists precisely because this fetch does not work for it. Say so
+    // rather than spending a request to reproduce the block; `record_from_html` is the
+    // equivalent selector check for these.
+    if input.manual {
+        return Err(ServerFnError::new(
+            "This retailer is set to manual entry, so there is nothing to fetch. \
+             Paste its page source instead.",
+        ));
+    }
+
     let client = price::client();
     let outcome = price::fetch_price(
         &client,
@@ -151,6 +163,151 @@ pub async fn test_source(input: SourceInput) -> Result<SourceTest, ServerFnError
         matched_text: outcome.matched_text,
         error: outcome.error,
     })
+}
+
+/// Records a price the user read off the page themselves.
+///
+/// The fallback for manual sources, and the only option on a phone where viewing a page's
+/// source is impractical. `price` is free text -- whatever the retailer displayed.
+#[server(name = RecordPrice, prefix = "/api", endpoint = "sources/record-price")]
+pub async fn record_price(source_id: String, price: String) -> Result<(), ServerFnError> {
+    use crate::server::auth;
+
+    let pool = crate::server::pool()?;
+    let user = auth::require_user(&pool).await?;
+    let user_id = auth::parse_id(&user.id, "user")?;
+    let source_id = auth::parse_id(&source_id, "source")?;
+
+    // The same parser the scraper uses, so a price typed as it appears on the page --
+    // "R 1 299,00" -- is read identically to one that was scraped.
+    let price_cents = crate::fmt::parse_price(&price)
+        .ok_or_else(|| ServerFnError::new("That does not look like a price."))?;
+    if price_cents < 0 {
+        return Err(ServerFnError::new("A price cannot be negative."));
+    }
+
+    insert_manual_snapshot(&pool, source_id, user_id, price_cents).await
+}
+
+/// Extracts a price from HTML the user pasted and records it.
+///
+/// The primary path for a retailer that blocks this host: the page cannot be fetched from
+/// here, but the user's own browser reaches it fine, so they supply the page and the
+/// source's stored selector does the rest. Extraction runs through the very same
+/// [`price::extract`](crate::server::price::extract) the scraper uses, so nothing about
+/// how a price is read differs between the two.
+///
+/// A returned `price_cents` of `Some` means the price was recorded; `None` means nothing
+/// was recorded and `error`/`matched_text` say why.
+#[server(name = RecordFromHtml, prefix = "/api", endpoint = "sources/record-html")]
+pub async fn record_from_html(
+    source_id: String,
+    html: String,
+) -> Result<SourceTest, ServerFnError> {
+    use crate::server::{auth, price};
+
+    let pool = crate::server::pool()?;
+    let user = auth::require_user(&pool).await?;
+    let user_id = auth::parse_id(&user.id, "user")?;
+    let source_id = auth::parse_id(&source_id, "source")?;
+
+    // Checked here as well as by the body limit on the route so an oversized paste gets a
+    // sentence rather than a bare 413. Keep the two numbers in step (see `main.rs`).
+    if html.len() > MAX_PASTED_HTML {
+        return Err(ServerFnError::new(
+            "That page is too large to accept. Paste the page source, not a saved copy \
+             with its images inlined.",
+        ));
+    }
+
+    // Loading the selector rather than taking it from the client keeps this consistent
+    // with what a refresh would have used, and the join is the ownership check.
+    let source = sqlx::query!(
+        r#"
+        select s.css_selector, s.price_regex
+        from item_sources s
+        join wishlist_items i on i.id = s.item_id
+        where s.id = $1 and i.user_id = $2
+        "#,
+        source_id,
+        user_id
+    )
+    .fetch_optional(&pool)
+    .await
+    .map_err(|e| ServerFnError::new(format!("Could not load the source: {e}")))?
+    .ok_or_else(|| ServerFnError::new("That source does not exist."))?;
+
+    if source.css_selector.is_empty() {
+        return Err(ServerFnError::new(
+            "Set a CSS selector for this retailer first, or enter the price directly.",
+        ));
+    }
+
+    let selector = scraper::Selector::parse(&source.css_selector)
+        .map_err(|_| ServerFnError::new("That CSS selector is not valid."))?;
+    let regex = match source
+        .price_regex
+        .as_deref()
+        .filter(|r| !r.trim().is_empty())
+    {
+        Some(r) => Some(
+            regex::Regex::new(r)
+                .map_err(|e| ServerFnError::new(format!("That regex is not valid: {e}")))?,
+        ),
+        None => None,
+    };
+
+    let outcome = price::extract(&html, &selector, regex.as_ref());
+
+    // Only a successful read is worth recording. A miss is a selector problem, and the
+    // caller shows the error and matched text so it can be fixed -- exactly like Test.
+    if let Some(price_cents) = outcome.price_cents {
+        insert_manual_snapshot(&pool, source_id, user_id, price_cents).await?;
+    }
+
+    Ok(SourceTest {
+        price_cents: outcome.price_cents,
+        matched_text: outcome.matched_text,
+        error: outcome.error,
+    })
+}
+
+/// Largest page this will accept, in bytes. Product pages run a few hundred KB; this
+/// leaves generous room while refusing something that is clearly not a page.
+#[cfg(feature = "ssr")]
+const MAX_PASTED_HTML: usize = 8 * 1024 * 1024;
+
+/// Writes a user-supplied price, with ownership enforced inside the statement.
+///
+/// Shared by both manual paths so they cannot disagree about what gets stored: `ok` is
+/// true (there is a price), and `manual` marks it as not having been measured by us.
+#[cfg(feature = "ssr")]
+async fn insert_manual_snapshot(
+    pool: &sqlx::PgPool,
+    source_id: uuid::Uuid,
+    user_id: uuid::Uuid,
+    price_cents: i64,
+) -> Result<(), ServerFnError> {
+    let result = sqlx::query!(
+        r#"
+        insert into price_snapshots (source_id, price_cents, ok, manual)
+        select s.id, $3, true, true
+        from item_sources s
+        join wishlist_items i on i.id = s.item_id
+        where s.id = $1 and i.user_id = $2
+        "#,
+        source_id,
+        user_id,
+        price_cents
+    )
+    .execute(pool)
+    .await
+    .map_err(|e| ServerFnError::new(format!("Could not record the price: {e}")))?;
+
+    if result.rows_affected() == 0 {
+        return Err(ServerFnError::new("That source does not exist."));
+    }
+    Ok(())
 }
 
 /// Trims fields, checks the URL, and defaults a blank label to the URL's host.
@@ -170,14 +327,20 @@ fn validate(mut input: SourceInput) -> Result<SourceInput, ServerFnError> {
         return Err(ServerFnError::new("The URL must be http or https."));
     }
 
+    // A scraped source cannot work without a selector. A manual one may leave it blank and
+    // rely on typed-in prices, but keeps it when there is one -- that is what reads a price
+    // out of pasted HTML.
     if input.css_selector.is_empty() {
-        return Err(ServerFnError::new("A CSS selector is required."));
+        if !input.manual {
+            return Err(ServerFnError::new("A CSS selector is required."));
+        }
+    } else {
+        // Reject a broken selector here rather than storing it and failing on every run.
+        // `scraper`'s error Display asks the reader to report a bug, which is wrong here --
+        // an invalid selector is user input, not a library fault.
+        scraper::Selector::parse(&input.css_selector)
+            .map_err(|_| ServerFnError::new("That CSS selector is not valid."))?;
     }
-    // Reject a broken selector here rather than storing it and failing on every run.
-    // `scraper`'s error Display asks the reader to report a bug, which is wrong here --
-    // an invalid selector is user input, not a library fault.
-    scraper::Selector::parse(&input.css_selector)
-        .map_err(|_| ServerFnError::new("That CSS selector is not valid."))?;
 
     if let Some(regex) = &input.price_regex {
         regex::Regex::new(regex)

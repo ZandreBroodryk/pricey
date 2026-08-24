@@ -78,7 +78,12 @@ pub fn PriceTable(rows: Vec<HistoryRow>, currency: String) -> impl IntoView {
                         <td class="col-price">{price}</td>
                         <td class=format!("col-change change-{direction}")>{change}</td>
                         <td class="col-status">
-                            {if row.ok {
+                            {if row.manual {
+                                // Worth distinguishing: this number was supplied by hand,
+                                // not measured, so it is only as good as what was typed.
+                                view! { <span class="badge badge-manual">"manual"</span> }
+                                    .into_any()
+                            } else if row.ok {
                                 view! { <span class="badge badge-ok">"ok"</span> }.into_any()
                             } else {
                                 let error = row.error.unwrap_or_else(|| "failed".to_string());
@@ -141,6 +146,7 @@ mod tests {
             price_cents: price,
             ok: price.is_some(),
             error: price.is_none().then(|| "boom".to_string()),
+            manual: false,
         }
     }
 
@@ -178,6 +184,15 @@ mod tests {
             vec![Some(20), None, None],
             "a failure is skipped, so the change bridges across it"
         );
+    }
+
+    #[test]
+    fn manual_prices_take_part_in_changes_like_any_other() {
+        // A manual snapshot is only distinguished in the status badge; for the purpose of
+        // "what changed since last time" it is an ordinary recorded price.
+        let mut rows = vec![row("a", 2, Some(90)), row("a", 1, Some(100))];
+        rows[0].manual = true;
+        assert_eq!(deltas(&rows), vec![Some(-10), None]);
     }
 
     #[test]

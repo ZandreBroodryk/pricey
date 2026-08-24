@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        update item_sources s\n        set label = $3, url = $4, css_selector = $5, price_regex = $6, active = $7,\n            manual = $8, updated_at = now()\n        from wishlist_items i\n        where s.id = $1 and i.id = s.item_id and i.user_id = $2\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Bool",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "96a645731185807921569aef841d7b3828a58113192ba315aaee04fcd1fbf39a"
+}

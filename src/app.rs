@@ -99,14 +99,27 @@ fn RequireAuth() -> impl IntoView {
     use leptos_router::components::{Outlet, Redirect};
 
     let user = expect_context::<UserResource>();
+    // The `<Outlet/>` below is built inside a suspended future, which runs under an owner
+    // nested in the `<Suspense/>`. Restoring this one first keeps the child routes on the
+    // same owner they would have had otherwise -- the same thing `<ProtectedParentRoute/>`
+    // does upstream.
+    let owner = Owner::current().expect("RequireAuth rendered without an owner");
 
     view! {
         <Suspense fallback=|| view! { <p class="loading">"Loading..."</p> }>
+            // Awaited rather than read with `.get()`. A resource keeps its previous answer
+            // while it re-runs, and signing in is exactly what makes this one re-run: a
+            // synchronous read here would still see the "nobody is signed in" from before
+            // the login and bounce the visitor straight back to the form they just
+            // submitted. Awaiting waits for the answer that accounts for the new session.
             {move || {
-                user.get().map(|result| match result {
-                    Ok(Some(_)) => view! { <Outlet/> }.into_any(),
-                    Ok(None) => view! { <Redirect path="/login"/> }.into_any(),
-                    Err(_) => view! { <Redirect path="/login"/> }.into_any(),
+                let owner = owner.clone();
+                Suspend::new(async move {
+                    match user.await {
+                        Ok(Some(_)) => owner.with(|| view! { <Outlet/> }.into_any()),
+                        Ok(None) => view! { <Redirect path="/login"/> }.into_any(),
+                        Err(_) => view! { <Redirect path="/login"/> }.into_any(),
+                    }
                 })
             }}
         </Suspense>

@@ -101,6 +101,17 @@ impl SourceFields {
     }
 }
 
+/// The URL to point a link at, or `None` when the field does not hold one yet.
+///
+/// Only absolute `http`/`https` URLs get a link. A relative `href` resolves against this
+/// site, so linking a half-typed URL would navigate the page away from the item rather
+/// than opening the retailer -- and losing a form full of edits to a stray click is worse
+/// than having no link on a URL that is not finished being typed.
+fn retailer_href(url: &str) -> Option<String> {
+    let url = url.trim();
+    (url.starts_with("http://") || url.starts_with("https://")).then(|| url.to_string())
+}
+
 #[component]
 pub fn ItemDetailPage() -> AnyView {
     let params = use_params_map();
@@ -195,8 +206,11 @@ fn ItemBody(
 
         <Show when=move || loaded.with(Option::is_some)>
             <ItemHead loaded=loaded item_id=item_id refresh=refresh/>
-            <RetailerList sources=sources item_id=item_id actions=actions/>
+            // History first: what the item has cost is the reason to open the page, while
+            // the retailer rows below are the form you come back to when you want to change
+            // something or log a price by hand.
             <PriceHistory loaded=loaded/>
+            <RetailerList sources=sources item_id=item_id actions=actions/>
         </Show>
     }
     .into_any()
@@ -210,23 +224,35 @@ fn ItemHead(
     refresh: ServerAction<RefreshItemNow>,
 ) -> AnyView {
     let name = move || loaded.get().map(|h| h.item.name).unwrap_or_default();
+    // A view rather than a string, so the retailer's name can carry a link out to the page
+    // this price came from: of every retailer on the item, the one holding the best price
+    // is the one worth opening.
     let best = move || {
-        loaded
-            .get()
-            .map(|h| {
-                h.item
-                    .best
-                    .map(|b| {
-                        format!(
-                            "{} at {} ({})",
-                            format_cents(b.price_cents, &h.item.currency),
-                            b.label,
-                            format_datetime(b.fetched_at),
-                        )
-                    })
-                    .unwrap_or_else(|| "No price recorded yet".to_string())
-            })
-            .unwrap_or_default()
+        let Some(h) = loaded.get() else {
+            return ().into_any();
+        };
+        let Some(best) = h.item.best else {
+            return view! { "No price recorded yet" }.into_any();
+        };
+
+        let price = format_cents(best.price_cents, &h.item.currency);
+        let when = format!(" ({})", format_datetime(best.fetched_at));
+        let href = h
+            .item
+            .sources
+            .iter()
+            .find(|s| s.id == best.source_id)
+            .and_then(|s| retailer_href(&s.url));
+
+        let retailer = match href {
+            Some(href) => view! {
+                <a href=href target="_blank" rel="noopener noreferrer">{best.label}</a>
+            }
+            .into_any(),
+            None => view! { {best.label} }.into_any(),
+        };
+
+        view! { {price} " at " {retailer} {when} }.into_any()
     };
     let target = move || {
         loaded.get().and_then(|h| {
@@ -445,7 +471,23 @@ fn SourceGrid(fields: SourceFields) -> AnyView {
                 />
             </label>
             <label class="wide">
-                "URL"
+                <span class="field-head">
+                    "URL"
+                    // Driven by the field rather than the saved row, so a URL that has just
+                    // been pasted into the add row can be checked before it is saved. An
+                    // anchor is not labelable content, so clicking it opens the retailer
+                    // instead of being swallowed as a click on the label.
+                    <Show when=move || url.with(|u| retailer_href(u).is_some())>
+                        <a
+                            class="open-link"
+                            href=move || url.with(|u| retailer_href(u).unwrap_or_default())
+                            target="_blank"
+                            rel="noopener noreferrer"
+                        >
+                            "Open \u{2197}"
+                        </a>
+                    </Show>
+                </span>
                 <input
                     type="url"
                     placeholder="https://shop.example/product/123"
@@ -505,8 +547,27 @@ fn SourceGrid(fields: SourceFields) -> AnyView {
 fn ManualEntry(source_id: String, fields: SourceFields, recorded: RwSignal<usize>) -> AnyView {
     let source_id = StoredValue::new(source_id);
     let SourceFields {
-        selector, regex, ..
+        url,
+        selector,
+        regex,
+        ..
     } = fields;
+
+    // The whole point of this panel is that the price has to be read off the retailer's own
+    // page, so put that page one click away instead of leaving it to be found by hand.
+    // The wrapper is inside the `map` so a source without a usable URL contributes no
+    // element at all: the panel is a flex column, and an empty div would still take a gap.
+    let visit = move || {
+        url.with(|u| retailer_href(u)).map(|href| {
+            view! {
+                <div class="source-visit">
+                    <a class="open-link" href=href target="_blank" rel="noopener noreferrer">
+                        "Open the product page \u{2197}"
+                    </a>
+                </div>
+            }
+        })
+    };
 
     let record_price = ServerAction::<RecordPrice>::new();
     let record_html = ServerAction::<RecordFromHtml>::new();
@@ -561,11 +622,13 @@ fn ManualEntry(source_id: String, fields: SourceFields, recorded: RwSignal<usize
 
     view! {
         <div class="source-manual">
+            {visit}
+
             <label class="wide">
                 "Page source"
                 <span class="muted">
-                    "Open the product page, press Ctrl+U, then Ctrl+A and Ctrl+C, and paste \
-                     it here. The selector above reads the price out of it."
+                    "On the product page press Ctrl+U, then Ctrl+A and Ctrl+C, and paste it \
+                     here. The selector above reads the price out of it."
                 </span>
                 <textarea
                     rows="4"
@@ -705,4 +768,38 @@ fn extraction_result(
             }
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::retailer_href;
+
+    #[test]
+    fn links_absolute_http_urls() {
+        assert_eq!(
+            retailer_href("https://shop.example/p/1"),
+            Some("https://shop.example/p/1".to_string())
+        );
+        assert_eq!(
+            retailer_href("  http://shop.example/p/1  "),
+            Some("http://shop.example/p/1".to_string()),
+            "a pasted URL often arrives with whitespace around it"
+        );
+    }
+
+    #[test]
+    fn refuses_anything_a_browser_would_resolve_against_this_site() {
+        // Each of these would render as a link that navigates the item page away rather
+        // than opening the retailer, taking any unsaved edits in the form with it.
+        for url in ["", "   ", "shop.example/p/1", "/items/1", "//shop.example"] {
+            assert_eq!(retailer_href(url), None, "{url:?} should not be linked");
+        }
+    }
+
+    #[test]
+    fn refuses_other_schemes() {
+        // A URL field is user input, and `javascript:` in an href runs on click.
+        assert_eq!(retailer_href("javascript:alert(1)"), None);
+        assert_eq!(retailer_href("ftp://shop.example/p/1"), None);
+    }
 }

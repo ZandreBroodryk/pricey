@@ -392,6 +392,22 @@ tr.row-failed td {
 	grid-column: 1 / -1;
 }
 
+// A field's caption and the link that opens what it points at, on one line above the
+// input. The label itself is a column, so this row has to be its own flex container.
+.field-head {
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	gap: 0.5rem;
+}
+
+// Links out to a retailer's own page. Sized down to a caption so it sits beside a field
+// label without competing with it.
+.open-link {
+	font-size: 0.8rem;
+	white-space: nowrap;
+}
+
 .source-actions {
 	display: flex;
 	align-items: center;
@@ -419,6 +435,14 @@ tr.row-failed td {
 		border: 1px solid var(--border);
 		border-radius: var(--radius);
 		padding: 0.4rem 0.5rem;
+	}
+
+	// The link to the retailer leads the block -- reading the price off their page is the
+	// first step of every path below it -- so it is not shrunk to a caption the way the
+	// one beside the URL field is. It has to name the link itself: `.open-link` sets a
+	// size directly on the anchor, so sizing the wrapper here would do nothing.
+	.source-visit .open-link {
+		font-size: 0.9rem;
 	}
 
 	// These sit inside the block, so they do not need the top margin the row's own

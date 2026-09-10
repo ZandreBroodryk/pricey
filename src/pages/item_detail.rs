@@ -206,11 +206,13 @@ fn ItemBody(
 
         <Show when=move || loaded.with(Option::is_some)>
             <ItemHead loaded=loaded item_id=item_id refresh=refresh/>
-            // History first: what the item has cost is the reason to open the page, while
-            // the retailer rows below are the form you come back to when you want to change
-            // something or log a price by hand.
-            <PriceHistory loaded=loaded/>
+            // The graph first: the shape of what the item has cost is the reason to open
+            // the page. The retailer rows are the form you come back to when you want to
+            // change something or log a price by hand, and the row-by-row log is the
+            // detail you go looking for last, so it sits at the bottom.
+            <PriceGraph loaded=loaded/>
             <RetailerList sources=sources item_id=item_id actions=actions/>
+            <PriceLog loaded=loaded/>
         </Show>
     }
     .into_any()
@@ -321,17 +323,25 @@ fn RetailerList(
     .into_any()
 }
 
-/// The chart and the table under it, rebuilt whenever new prices arrive.
+/// The chart of every retailer's prices over time, rebuilt whenever new prices arrive.
 #[component]
-fn PriceHistory(loaded: Memo<Option<ItemHistory>>) -> AnyView {
+fn PriceGraph(loaded: Memo<Option<ItemHistory>>) -> AnyView {
     view! {
-        {move || loaded.get().map(|h| {
-            let currency = h.item.currency;
-            view! {
-                <h2>"Price history"</h2>
-                <PriceChart series=h.series currency=currency.clone()/>
-                <PriceTable rows=h.rows currency=currency/>
-            }
+        {move || loaded.get().map(|h| view! {
+            <h2>"Price history"</h2>
+            <PriceChart series=h.series currency=h.item.currency/>
+        })}
+    }
+    .into_any()
+}
+
+/// Every recorded fetch, successful or not, rebuilt whenever new prices arrive.
+#[component]
+fn PriceLog(loaded: Memo<Option<ItemHistory>>) -> AnyView {
+    view! {
+        {move || loaded.get().map(|h| view! {
+            <h2>"Recorded prices"</h2>
+            <PriceTable rows=h.rows currency=h.item.currency/>
         })}
     }
     .into_any()

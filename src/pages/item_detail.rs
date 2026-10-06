@@ -385,6 +385,9 @@ fn SourceEditor(
     // Per row, like recording: a shared action would splash one row's result across all of
     // them.
     let test = ServerAction::<TestSource>::new();
+    // Kept so adding a retailer can call off a test still in flight: its result would
+    // otherwise land on the emptied row after the fact.
+    let running_test = StoredValue::new(None::<leptos::reactive::actions::ActionAbortHandle>);
 
     let save = move |ev: leptos::ev::SubmitEvent| {
         ev.prevent_default();
@@ -401,6 +404,12 @@ fn SourceEditor(
                     input: fields.gather(),
                 });
                 fields.clear();
+                // The test result describes the retailer just added, not the blank row
+                // left behind. Leaving it up would vouch for a setup nobody has tested.
+                if let Some(running) = running_test.write_value().take() {
+                    running.abort();
+                }
+                test.value().set(None);
             }
         }
     };
@@ -435,7 +444,10 @@ fn SourceEditor(
                         type="button"
                         class="secondary"
                         disabled=move || test.pending().get()
-                        on:click=move |_| { test.dispatch(TestSource { input: fields.gather() }); }
+                        on:click=move |_| {
+                            let running = test.dispatch(TestSource { input: fields.gather() });
+                            running_test.set_value(Some(running));
+                        }
                     >
                         {move || if test.pending().get() { "Testing..." } else { "Test" }}
                     </button>
